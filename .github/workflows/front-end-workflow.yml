@@ -94,7 +94,10 @@ jobs:
   # ── Stage 3: Build Web Application ─────────────────────────────
   web-build:
     name: "Web — Build"
-    needs: [web-sonarcloud]
+    needs: [web-sonarcloud, web-lint, web-security]
+    if: |
+      always() &&
+      !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
     defaults:
       run:

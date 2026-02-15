@@ -12,7 +12,7 @@
 # ║  └────┬─────┘                                                  ║
 # ║       ▼                                                        ║
 # ║  ┌──────────┐                                                  ║
-# ║  │  prod     │  CI + UAT verify + Gate + Deploy to Prod       ║
+# ║  │  prod     │  CI + Production Gate + Deploy to Prod        ║
 # ║  └──────────┘                                                  ║
 # ║                                                                ║
 # ║  All 3 systems run in PARALLEL at every stage.                 ║
@@ -36,11 +36,47 @@ concurrency:
 
 jobs:
   # ╔══════════════════════════════════════════════════════════════╗
+  # ║  STAGE 0 — Detect Changes (skip unchanged sub-projects)    ║
+  # ╚══════════════════════════════════════════════════════════════╝
+  detect-changes:
+    name: "Detect Changed Projects"
+    runs-on: ubuntu-latest
+    outputs:
+      bayanihub-web: ${{ steps.filter.outputs.bayanihub-web }}
+      damayan-web: ${{ steps.filter.outputs.damayan-web }}
+      hopecard-web: ${{ steps.filter.outputs.hopecard-web }}
+      shared: ${{ steps.filter.outputs.shared }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect file changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            bayanihub-web:
+              - 'BayaniHub-Web/**'
+            damayan-web:
+              - 'DAMAYAN-Web/**'
+            hopecard-web:
+              - 'HopeCard-Web/**'
+            shared:
+              - '.github/**'
+              - 'package.json'
+              - 'sonar-project.properties'
+
+  # ╔══════════════════════════════════════════════════════════════╗
   # ║  STAGE 1 — All Frontend Pipelines (PARALLEL)               ║
   # ║  Tests + Lint + Security + SonarCloud + Build               ║
+  # ║  Each only runs if its files changed (or shared files)      ║
   # ╚══════════════════════════════════════════════════════════════╝
   bayanihub-web:
     name: "BayaniHub-Web Pipeline"
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.bayanihub-web == 'true' || needs.detect-changes.outputs.shared == 'true'
     uses: ./.github/workflows/front-end-workflow.yml
     with:
       system-dir: BayaniHub-Web
@@ -49,6 +85,8 @@ jobs:
 
   damayan-web:
     name: "DAMAYAN-Web Pipeline"
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.damayan-web == 'true' || needs.detect-changes.outputs.shared == 'true'
     uses: ./.github/workflows/front-end-workflow.yml
     with:
       system-dir: DAMAYAN-Web
@@ -57,6 +95,8 @@ jobs:
 
   hopecard-web:
     name: "HopeCard-Web Pipeline"
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.hopecard-web == 'true' || needs.detect-changes.outputs.shared == 'true'
     uses: ./.github/workflows/front-end-workflow.yml
     with:
       system-dir: HopeCard-Web
@@ -69,7 +109,10 @@ jobs:
   deploy-uat-bayanihub:
     name: "UAT — BayaniHub-Web"
     needs: [bayanihub-web]
-    if: github.ref == 'refs/heads/uat' && github.event_name == 'push'
+    if: |
+      always() &&
+      github.ref == 'refs/heads/uat' && github.event_name == 'push' &&
+      needs.bayanihub-web.result == 'success'
     uses: ./.github/workflows/deploy-staging.yml
     with:
       system-dir: BayaniHub-Web
@@ -82,7 +125,10 @@ jobs:
   deploy-uat-damayan:
     name: "UAT — DAMAYAN-Web"
     needs: [damayan-web]
-    if: github.ref == 'refs/heads/uat' && github.event_name == 'push'
+    if: |
+      always() &&
+      github.ref == 'refs/heads/uat' && github.event_name == 'push' &&
+      needs.damayan-web.result == 'success'
     uses: ./.github/workflows/deploy-staging.yml
     with:
       system-dir: DAMAYAN-Web
@@ -95,7 +141,10 @@ jobs:
   deploy-uat-hopecard:
     name: "UAT — HopeCard-Web"
     needs: [hopecard-web]
-    if: github.ref == 'refs/heads/uat' && github.event_name == 'push'
+    if: |
+      always() &&
+      github.ref == 'refs/heads/uat' && github.event_name == 'push' &&
+      needs.hopecard-web.result == 'success'
     uses: ./.github/workflows/deploy-staging.yml
     with:
       system-dir: HopeCard-Web
@@ -106,64 +155,27 @@ jobs:
     secrets: inherit
 
   # ╔══════════════════════════════════════════════════════════════╗
-  # ║  STAGE 3 — Deploy to Prod (prod branch only, PARALLEL)     ║
-  # ║  Step 1: Deploy to UAT first for verification               ║
-  # ║  Step 2: Production gate (approval + checklist)             ║
-  # ║  Step 3: Deploy to Prod                                     ║
+  # ║  STAGE 3 — Deploy to Prod (prod branch only)               ║
+  # ║  UAT was already verified on the uat branch.                ║
+  # ║  Step 1: Production gate (approval + checklist)             ║
+  # ║  Step 2: Deploy to Prod                                     ║
   # ╚══════════════════════════════════════════════════════════════╝
 
-  # ── Step 3A: Deploy to UAT as pre-prod verification ────────────
-  verify-uat-bayanihub:
-    name: "Prod — UAT Verify BayaniHub-Web"
-    needs: [bayanihub-web]
-    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
-    uses: ./.github/workflows/deploy-staging.yml
-    with:
-      system-dir: BayaniHub-Web
-      system-name: BayaniHub-Web
-      app-type: web
-      artifact-name: BayaniHub-Web-web-build
-      deploy-environment: uat
-    secrets: inherit
-
-  verify-uat-damayan:
-    name: "Prod — UAT Verify DAMAYAN-Web"
-    needs: [damayan-web]
-    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
-    uses: ./.github/workflows/deploy-staging.yml
-    with:
-      system-dir: DAMAYAN-Web
-      system-name: DAMAYAN-Web
-      app-type: web
-      artifact-name: DAMAYAN-Web-web-build
-      deploy-environment: uat
-    secrets: inherit
-
-  verify-uat-hopecard:
-    name: "Prod — UAT Verify HopeCard-Web"
-    needs: [hopecard-web]
-    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
-    uses: ./.github/workflows/deploy-staging.yml
-    with:
-      system-dir: HopeCard-Web
-      system-name: HopeCard-Web
-      app-type: web
-      artifact-name: HopeCard-Web-web-build
-      deploy-environment: uat
-    secrets: inherit
-
-  # ── Step 3B: Production Gate (after UAT verification) ──────────
+  # ── Step 3A: Production Gate ───────────────────────────────────
   production-gate:
     name: "Production Readiness Gate"
-    needs: [verify-uat-bayanihub, verify-uat-damayan, verify-uat-hopecard]
-    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    needs: [bayanihub-web, damayan-web, hopecard-web]
+    if: |
+      always() &&
+      github.ref == 'refs/heads/prod' && github.event_name == 'push' &&
+      !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
     uses: ./.github/workflows/production-gate.yml
     with:
       system-dir: Tribe3-Frontend
       app-type: web
     secrets: inherit
 
-  # ── Step 3C: Deploy to Prod (after gate approval) ─────────────
+  # ── Step 3B: Deploy to Prod (after gate approval) ─────────────
   deploy-prod-bayanihub:
     name: "Prod — BayaniHub-Web"
     needs: [production-gate]

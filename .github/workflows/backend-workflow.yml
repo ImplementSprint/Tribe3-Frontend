@@ -110,8 +110,11 @@ jobs:
   # ── Stage 3: Docker Build & Push ────────────────────────────────
   api-docker:
     name: "API — Docker Build"
-    if: ${{ inputs.enable-docker-build && inputs.docker-image-name != '' }}
-    needs: [api-sonarcloud]
+    if: |
+      always() &&
+      inputs.enable-docker-build && inputs.docker-image-name != '' &&
+      !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    needs: [api-sonarcloud, api-lint, api-security]
     uses: ./.github/workflows/docker-build.yml
     with:
       working-directory: ${{ inputs.system-dir }}
