@@ -12,7 +12,7 @@
 # ║  └────┬─────┘                                                  ║
 # ║       ▼                                                        ║
 # ║  ┌──────────┐                                                  ║
-# ║  │  prod     │  CI + Deploy to Prod + Production Gate          ║
+# ║  │  prod     │  CI + UAT verify + Gate + Deploy to Prod       ║
 # ║  └──────────┘                                                  ║
 # ║                                                                ║
 # ║  All 3 systems run in PARALLEL at every stage.                 ║
@@ -107,10 +107,66 @@ jobs:
 
   # ╔══════════════════════════════════════════════════════════════╗
   # ║  STAGE 3 — Deploy to Prod (prod branch only, PARALLEL)     ║
+  # ║  Step 1: Deploy to UAT first for verification               ║
+  # ║  Step 2: Production gate (approval + checklist)             ║
+  # ║  Step 3: Deploy to Prod                                     ║
   # ╚══════════════════════════════════════════════════════════════╝
+
+  # ── Step 3A: Deploy to UAT as pre-prod verification ────────────
+  verify-uat-bayanihub:
+    name: "Prod — UAT Verify BayaniHub-Web"
+    needs: [bayanihub-web]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: BayaniHub-Web
+      system-name: BayaniHub-Web
+      app-type: web
+      artifact-name: BayaniHub-Web-web-build
+      deploy-environment: uat
+    secrets: inherit
+
+  verify-uat-damayan:
+    name: "Prod — UAT Verify DAMAYAN-Web"
+    needs: [damayan-web]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: DAMAYAN-Web
+      system-name: DAMAYAN-Web
+      app-type: web
+      artifact-name: DAMAYAN-Web-web-build
+      deploy-environment: uat
+    secrets: inherit
+
+  verify-uat-hopecard:
+    name: "Prod — UAT Verify HopeCard-Web"
+    needs: [hopecard-web]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: HopeCard-Web
+      system-name: HopeCard-Web
+      app-type: web
+      artifact-name: HopeCard-Web-web-build
+      deploy-environment: uat
+    secrets: inherit
+
+  # ── Step 3B: Production Gate (after UAT verification) ──────────
+  production-gate:
+    name: "Production Readiness Gate"
+    needs: [verify-uat-bayanihub, verify-uat-damayan, verify-uat-hopecard]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/production-gate.yml
+    with:
+      system-dir: Tribe3-Frontend
+      app-type: web
+    secrets: inherit
+
+  # ── Step 3C: Deploy to Prod (after gate approval) ─────────────
   deploy-prod-bayanihub:
     name: "Prod — BayaniHub-Web"
-    needs: [bayanihub-web]
+    needs: [production-gate]
     if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
     uses: ./.github/workflows/deploy-staging.yml
     with:
@@ -123,7 +179,7 @@ jobs:
 
   deploy-prod-damayan:
     name: "Prod — DAMAYAN-Web"
-    needs: [damayan-web]
+    needs: [production-gate]
     if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
     uses: ./.github/workflows/deploy-staging.yml
     with:
@@ -136,7 +192,7 @@ jobs:
 
   deploy-prod-hopecard:
     name: "Prod — HopeCard-Web"
-    needs: [hopecard-web]
+    needs: [production-gate]
     if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
     uses: ./.github/workflows/deploy-staging.yml
     with:
@@ -145,19 +201,6 @@ jobs:
       app-type: web
       artifact-name: HopeCard-Web-web-build
       deploy-environment: prod
-    secrets: inherit
-
-  # ╔══════════════════════════════════════════════════════════════╗
-  # ║  STAGE 4 — Production Gate (prod branch only)              ║
-  # ╚══════════════════════════════════════════════════════════════╝
-  production-gate:
-    name: "Production Readiness Gate"
-    needs: [deploy-prod-bayanihub, deploy-prod-damayan, deploy-prod-hopecard]
-    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
-    uses: ./.github/workflows/production-gate.yml
-    with:
-      system-dir: Tribe3-Frontend
-      app-type: web
     secrets: inherit
 
   # ╔══════════════════════════════════════════════════════════════╗
