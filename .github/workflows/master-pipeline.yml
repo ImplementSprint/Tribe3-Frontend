@@ -104,6 +104,58 @@ jobs:
     secrets: inherit
 
   # ╔══════════════════════════════════════════════════════════════╗
+  # ║  STAGE 1.5 — SonarCloud (single monorepo scan)             ║
+  # ║  Runs ONCE after all sub-project tests pass                 ║
+  # ║  Collects all coverage reports into one analysis            ║
+  # ╚══════════════════════════════════════════════════════════════╝
+  sonarcloud:
+    name: "SonarCloud — Monorepo Analysis"
+    needs: [bayanihub-web, damayan-web, hopecard-web]
+    if: |
+      always() &&
+      !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download BayaniHub-Web Coverage
+        if: needs.bayanihub-web.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: BayaniHub-Web-coverage
+          path: BayaniHub-Web/coverage
+        continue-on-error: true
+
+      - name: Download DAMAYAN-Web Coverage
+        if: needs.damayan-web.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: DAMAYAN-Web-coverage
+          path: DAMAYAN-Web/coverage
+        continue-on-error: true
+
+      - name: Download HopeCard-Web Coverage
+        if: needs.hopecard-web.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: HopeCard-Web-coverage
+          path: HopeCard-Web/coverage
+        continue-on-error: true
+
+      - name: Run SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@v5.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+
+  # ╔══════════════════════════════════════════════════════════════╗
   # ║  STAGE 2 — Deploy to UAT (uat branch only, PARALLEL)       ║
   # ╚══════════════════════════════════════════════════════════════╝
   deploy-uat-bayanihub:

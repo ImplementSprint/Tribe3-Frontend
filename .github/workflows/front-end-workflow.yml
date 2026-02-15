@@ -1,7 +1,7 @@
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  ORCHESTRATOR: Frontend Web CI/CD Pipeline                     ║
-# ║  Composes reusable workflows: test → lint → sonar → build     ║
-# ║  Any tribe can call this with their project directory          ║
+# ║  Composes reusable workflows: test → lint → security → build  ║
+# ║  SonarCloud runs once at the monorepo level (master-pipeline) ║
 # ╚══════════════════════════════════════════════════════════════════╝
 name: "Frontend Web CI/CD Pipeline"
 
@@ -40,10 +40,6 @@ on:
     secrets:
       SONAR_TOKEN:
         required: false
-      SONAR_PROJECT_KEY:
-        required: true
-      SONAR_ORGANIZATION:
-        required: true
 
 jobs:
   # ── Stage 1A: Unit Tests (Vitest) ───────────────────────────────
@@ -77,24 +73,10 @@ jobs:
       system-name: ${{ inputs.system-name }}
       node-version: ${{ inputs.node-version }}
 
-  # ── Stage 2: SonarCloud Quality Gate ────────────────────────────
-  web-sonarcloud:
-    name: "Web — SonarCloud Analysis"
-    needs: web-unit-tests
-    uses: ./.github/workflows/sonarcloud-scan.yml
-    with:
-      working-directory: ${{ inputs.system-dir }}
-      system-name: ${{ inputs.system-name }}
-      coverage-artifact-name: ${{ inputs.system-name }}-coverage
-    secrets:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-      SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
-      SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
-
-  # ── Stage 3: Build Web Application ─────────────────────────────
+  # ── Stage 2: Build Web Application ─────────────────────────────
   web-build:
     name: "Web — Build"
-    needs: [web-sonarcloud, web-lint, web-security]
+    needs: [web-unit-tests, web-lint, web-security]
     if: |
       always() &&
       !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')

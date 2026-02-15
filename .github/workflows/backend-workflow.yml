@@ -1,7 +1,7 @@
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  ORCHESTRATOR: Backend CI/CD Pipeline                          ║
-# ║  Composes reusable workflows: test → lint → sonar → docker    ║
-# ║  Any tribe can call this with their project directory          ║
+# ║  Composes reusable workflows: test → lint → security → docker ║
+# ║  SonarCloud runs once at the monorepo level (master-pipeline) ║
 # ╚══════════════════════════════════════════════════════════════════╝
 name: "Backend CI/CD Pipeline"
 
@@ -55,10 +55,6 @@ on:
     secrets:
       SONAR_TOKEN:
         required: false
-      SONAR_PROJECT_KEY:
-        required: true
-      SONAR_ORGANIZATION:
-        required: true
 
 jobs:
   # ── Stage 1A: Unit Tests (Jest) ─────────────────────────────────
