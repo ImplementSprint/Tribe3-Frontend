@@ -1,31 +1,29 @@
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  MASTER PIPELINE ORCHESTRATOR                                  ║
 # ║  Coordinates all tribe system pipelines in parallel            ║
-# ║  Triggers: push (any branch), PR to main/develop              ║
 # ║                                                                ║
-# ║  Pipeline Flow:                                                ║
-# ║  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐            ║
-# ║  │ BayaniHub   │  │ DAMAYAN     │  │ HopeCard    │  PARALLEL  ║
-# ║  │ Web Pipeline│  │ Web Pipeline│  │ Web Pipeline│            ║
-# ║  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘            ║
-# ║         │                │                │                    ║
-# ║         └────────────────┼────────────────┘                    ║
-# ║                          ▼                                     ║
-# ║              ┌───────────────────────┐                         ║
-# ║              │   Deploy to Staging   │  (main/develop only)    ║
-# ║              └───────────┬───────────┘                         ║
-# ║                          ▼                                     ║
-# ║              ┌───────────────────────┐                         ║
-# ║              │   Production Gate     │  (tagged releases)      ║
-# ║              └───────────────────────┘                         ║
+# ║  Branch Strategy:                                              ║
+# ║  ┌──────────┐                                                  ║
+# ║  │  test     │  CI only (tests + lint + security + sonar)      ║
+# ║  └────┬─────┘                                                  ║
+# ║       ▼                                                        ║
+# ║  ┌──────────┐                                                  ║
+# ║  │  uat      │  CI + Deploy to UAT environment                 ║
+# ║  └────┬─────┘                                                  ║
+# ║       ▼                                                        ║
+# ║  ┌──────────┐                                                  ║
+# ║  │  prod     │  CI + Deploy to Prod + Production Gate          ║
+# ║  └──────────┘                                                  ║
+# ║                                                                ║
+# ║  All 3 systems run in PARALLEL at every stage.                 ║
 # ╚══════════════════════════════════════════════════════════════════╝
 name: "Master Pipeline Orchestrator"
 
 on:
   push:
-    branches: ["**"]
+    branches: [test, uat, prod]
   pull_request:
-    branches: [main, develop]
+    branches: [test, uat, prod]
 
 permissions:
   contents: read
@@ -66,51 +64,96 @@ jobs:
     secrets: inherit
 
   # ╔══════════════════════════════════════════════════════════════╗
-  # ║  STAGE 2 — Deploy to Staging (main/develop only, PARALLEL) ║
+  # ║  STAGE 2 — Deploy to UAT (uat branch only, PARALLEL)       ║
   # ╚══════════════════════════════════════════════════════════════╝
-  deploy-staging-bayanihub:
-    name: "Staging — BayaniHub-Web"
+  deploy-uat-bayanihub:
+    name: "UAT — BayaniHub-Web"
     needs: [bayanihub-web]
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    if: github.ref == 'refs/heads/uat' && github.event_name == 'push'
     uses: ./.github/workflows/deploy-staging.yml
     with:
       system-dir: BayaniHub-Web
       system-name: BayaniHub-Web
       app-type: web
       artifact-name: BayaniHub-Web-web-build
+      deploy-environment: uat
     secrets: inherit
 
-  deploy-staging-damayan:
-    name: "Staging — DAMAYAN-Web"
+  deploy-uat-damayan:
+    name: "UAT — DAMAYAN-Web"
     needs: [damayan-web]
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    if: github.ref == 'refs/heads/uat' && github.event_name == 'push'
     uses: ./.github/workflows/deploy-staging.yml
     with:
       system-dir: DAMAYAN-Web
       system-name: DAMAYAN-Web
       app-type: web
       artifact-name: DAMAYAN-Web-web-build
+      deploy-environment: uat
     secrets: inherit
 
-  deploy-staging-hopecard:
-    name: "Staging — HopeCard-Web"
+  deploy-uat-hopecard:
+    name: "UAT — HopeCard-Web"
     needs: [hopecard-web]
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    if: github.ref == 'refs/heads/uat' && github.event_name == 'push'
     uses: ./.github/workflows/deploy-staging.yml
     with:
       system-dir: HopeCard-Web
       system-name: HopeCard-Web
       app-type: web
       artifact-name: HopeCard-Web-web-build
+      deploy-environment: uat
     secrets: inherit
 
   # ╔══════════════════════════════════════════════════════════════╗
-  # ║  STAGE 3 — Production Gate (main branch only)              ║
+  # ║  STAGE 3 — Deploy to Prod (prod branch only, PARALLEL)     ║
+  # ╚══════════════════════════════════════════════════════════════╝
+  deploy-prod-bayanihub:
+    name: "Prod — BayaniHub-Web"
+    needs: [bayanihub-web]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: BayaniHub-Web
+      system-name: BayaniHub-Web
+      app-type: web
+      artifact-name: BayaniHub-Web-web-build
+      deploy-environment: prod
+    secrets: inherit
+
+  deploy-prod-damayan:
+    name: "Prod — DAMAYAN-Web"
+    needs: [damayan-web]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: DAMAYAN-Web
+      system-name: DAMAYAN-Web
+      app-type: web
+      artifact-name: DAMAYAN-Web-web-build
+      deploy-environment: prod
+    secrets: inherit
+
+  deploy-prod-hopecard:
+    name: "Prod — HopeCard-Web"
+    needs: [hopecard-web]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: HopeCard-Web
+      system-name: HopeCard-Web
+      app-type: web
+      artifact-name: HopeCard-Web-web-build
+      deploy-environment: prod
+    secrets: inherit
+
+  # ╔══════════════════════════════════════════════════════════════╗
+  # ║  STAGE 4 — Production Gate (prod branch only)              ║
   # ╚══════════════════════════════════════════════════════════════╝
   production-gate:
     name: "Production Readiness Gate"
-    needs: [deploy-staging-bayanihub, deploy-staging-damayan, deploy-staging-hopecard]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [deploy-prod-bayanihub, deploy-prod-damayan, deploy-prod-hopecard]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
     uses: ./.github/workflows/production-gate.yml
     with:
       system-dir: Tribe3-Frontend

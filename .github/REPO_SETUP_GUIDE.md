@@ -7,11 +7,12 @@
 ## Table of Contents
 
 1. [GitHub Secrets (Required)](#1-github-secrets-required)
-2. [Single-System Repo (root directory)](#2-single-system-repo-root-directory)
-3. [Multi-System Repo (subdirectories)](#3-multi-system-repo-subdirectories)
-4. [Required Files per System](#4-required-files-per-system)
-5. [Workflow Files to Copy](#5-workflow-files-to-copy)
-6. [Quick Checklist](#6-quick-checklist)
+2. [Branching Strategy](#2-branching-strategy)
+3. [Single-System Repo (root directory)](#3-single-system-repo-root-directory)
+4. [Multi-System Repo (subdirectories)](#4-multi-system-repo-subdirectories)
+5. [Required Files per System](#5-required-files-per-system)
+6. [Workflow Files to Copy](#6-workflow-files-to-copy)
+7. [Quick Checklist](#7-quick-checklist)
 
 ---
 
@@ -29,7 +30,51 @@ Go to **Settings → Secrets and variables → Actions** in the GitHub repo and 
 
 ---
 
-## 2. Single-System Repo (root directory)
+## 2. Branching Strategy
+
+Every repo uses **3 long-lived branches**:
+
+```
+  test branch        uat branch          prod branch
+  ─────────────      ──────────────      ──────────────
+  CI only            CI + Deploy UAT     CI + Deploy Prod
+  (tests, lint,      (same as test,      (same as uat,
+   security,          PLUS deploy to      PLUS production
+   sonar, build)      UAT environment)    gate approval)
+
+  Push flow:   test ──merge──▶ uat ──merge──▶ prod
+```
+
+| Branch | What Runs | Deploy? | Approval? |
+|--------|-----------|---------|----------|
+| `test` | Tests + Lint + Security + SonarCloud + Build | No | No |
+| `uat`  | All CI + Deploy to UAT environment | Yes (UAT) | No |
+| `prod` | All CI + Deploy to Prod + Production Gate | Yes (Prod) | Yes |
+
+### Setup
+
+```bash
+# Create the 3 branches
+git checkout -b test
+git push -u origin test
+
+git checkout -b uat
+git push -u origin uat
+
+git checkout -b prod
+git push -u origin prod
+```
+
+In GitHub → **Settings → Environments**:
+- Create `uat` environment
+- Create `production` environment → add **required reviewers** for approval gate
+
+In GitHub → **Settings → Branches**:
+- Add branch protection for `uat` and `prod` (require PR, require status checks to pass)
+
+---
+
+## 3. Single-System Repo (root directory)
 
 **Example:** `Tribe5-Frontend` with one system called `PadyakPH-Web`
 
@@ -67,9 +112,9 @@ name: "Master Pipeline Orchestrator"
 
 on:
   push:
-    branches: ["**"]
+    branches: [test, uat, prod]
   pull_request:
-    branches: [main, develop]
+    branches: [test, uat, prod]
 
 permissions:
   contents: read
@@ -81,6 +126,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── Stage 1: CI (all branches) ──
   frontend:
     name: "PadyakPH-Web Pipeline"
     uses: ./.github/workflows/front-end-workflow.yml
@@ -89,16 +135,43 @@ jobs:
       system-name: PadyakPH-Web          # <-- your project name
     secrets: inherit
 
-  deploy-staging:
-    name: "Staging — PadyakPH-Web"
+  # ── Stage 2: Deploy to UAT (uat branch only) ──
+  deploy-uat:
+    name: "UAT — PadyakPH-Web"
     needs: [frontend]
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    if: github.ref == 'refs/heads/uat' && github.event_name == 'push'
     uses: ./.github/workflows/deploy-staging.yml
     with:
       system-dir: "."
       system-name: PadyakPH-Web
       app-type: web
       artifact-name: PadyakPH-Web-web-build
+      deploy-environment: uat
+    secrets: inherit
+
+  # ── Stage 3: Deploy to Prod (prod branch only) ──
+  deploy-prod:
+    name: "Prod — PadyakPH-Web"
+    needs: [frontend]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: "."
+      system-name: PadyakPH-Web
+      app-type: web
+      artifact-name: PadyakPH-Web-web-build
+      deploy-environment: prod
+    secrets: inherit
+
+  # ── Stage 4: Production Gate (prod branch only) ──
+  production-gate:
+    name: "Production Gate"
+    needs: [deploy-prod]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/production-gate.yml
+    with:
+      system-dir: "."
+      app-type: web
     secrets: inherit
 
   pipeline-summary:
@@ -115,7 +188,7 @@ jobs:
 
 ---
 
-## 3. Multi-System Repo (subdirectories)
+## 4. Multi-System Repo (subdirectories)
 
 **Example:** `Tribe3-Frontend` with 3 systems
 
@@ -148,9 +221,9 @@ name: "Master Pipeline Orchestrator"
 
 on:
   push:
-    branches: ["**"]
+    branches: [test, uat, prod]
   pull_request:
-    branches: [main, develop]
+    branches: [test, uat, prod]
 
 permissions:
   contents: read
@@ -189,7 +262,7 @@ jobs:
 
 ---
 
-## 4. Required Files per System
+## 5. Required Files per System
 
 Each system (whether at root or in a subdirectory) needs these files:
 
@@ -396,7 +469,7 @@ describe('App', () => {
 
 ---
 
-## 5. Workflow Files to Copy
+## 6. Workflow Files to Copy
 
 Copy **all** these reusable workflow files into `.github/workflows/` of every new repo:
 
@@ -418,7 +491,7 @@ For **mobile** repos, also copy: `mobile-workflow.yml`, `mobile-tests.yml`
 
 ---
 
-## 6. Quick Checklist
+## 7. Quick Checklist
 
 ### Per Repository
 

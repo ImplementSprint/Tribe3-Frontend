@@ -46,9 +46,9 @@ name: "Single-System Frontend Pipeline Example"
 
 on:
   push:
-    branches: ["**"]
+    branches: [test, uat, prod]
   pull_request:
-    branches: [main, develop]
+    branches: [test, uat, prod]
 
 permissions:
   contents: read
@@ -60,6 +60,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── Stage 1: CI (all branches) ──
   # Only ONE system — code lives at repo root
   frontend:
     name: "PadyakPH-Web Pipeline"
@@ -69,24 +70,39 @@ jobs:
       system-name: PadyakPH-Web                         # <-- project name for artifacts
     secrets: inherit                                      # <-- SONAR_TOKEN, SONAR_PROJECT_KEY, SONAR_ORGANIZATION from repo secrets
 
-  # Deploy to staging
-  deploy-staging:
-    name: "Staging — PadyakPH-Web"
+  # ── Stage 2: Deploy to UAT (uat branch only) ──
+  deploy-uat:
+    name: "UAT — PadyakPH-Web"
     needs: [frontend]
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    if: github.ref == 'refs/heads/uat' && github.event_name == 'push'
     uses: ./.github/workflows/deploy-staging.yml
     with:
       system-dir: "."
       system-name: PadyakPH-Web
       app-type: web
-      artifact-name: PadyakPH-Web-web-build             # <-- uses system-name, not "."
+      artifact-name: PadyakPH-Web-web-build
+      deploy-environment: uat                            # <-- deploy to UAT environment
     secrets: inherit
 
-  # Production gate
+  # ── Stage 3: Deploy to Prod (prod branch only) ──
+  deploy-prod:
+    name: "Prod — PadyakPH-Web"
+    needs: [frontend]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: "."
+      system-name: PadyakPH-Web
+      app-type: web
+      artifact-name: PadyakPH-Web-web-build
+      deploy-environment: prod                           # <-- deploy to Prod environment
+    secrets: inherit
+
+  # ── Stage 4: Production Gate (prod branch only) ──
   production-gate:
     name: "Production Gate"
-    needs: [deploy-staging]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [deploy-prod]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
     uses: ./.github/workflows/production-gate.yml
     with:
       system-dir: "."
