@@ -111,9 +111,11 @@ jobs:
   sonarcloud:
     name: "SonarCloud — Monorepo Analysis"
     needs: [bayanihub-web, damayan-web, hopecard-web]
-    if: |
+    if: >-
       always() &&
-      !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+      (needs.bayanihub-web.result == 'success' || needs.bayanihub-web.result == 'skipped') &&
+      (needs.damayan-web.result == 'success' || needs.damayan-web.result == 'skipped') &&
+      (needs.hopecard-web.result == 'success' || needs.hopecard-web.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -217,10 +219,12 @@ jobs:
   production-gate:
     name: "Production Readiness Gate"
     needs: [bayanihub-web, damayan-web, hopecard-web]
-    if: |
+    if: >-
       always() &&
       github.ref == 'refs/heads/prod' && github.event_name == 'push' &&
-      !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+      (needs.bayanihub-web.result == 'success' || needs.bayanihub-web.result == 'skipped') &&
+      (needs.damayan-web.result == 'success' || needs.damayan-web.result == 'skipped') &&
+      (needs.hopecard-web.result == 'success' || needs.hopecard-web.result == 'skipped')
     uses: ./.github/workflows/production-gate.yml
     with:
       system-dir: Tribe3-Frontend
