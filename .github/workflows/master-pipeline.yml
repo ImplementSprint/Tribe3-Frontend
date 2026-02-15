@@ -113,9 +113,9 @@ jobs:
     needs: [bayanihub-web, damayan-web, hopecard-web]
     if: >-
       always() &&
-      (needs.bayanihub-web.result == 'success' || needs.bayanihub-web.result == 'skipped') &&
-      (needs.damayan-web.result == 'success' || needs.damayan-web.result == 'skipped') &&
-      (needs.hopecard-web.result == 'success' || needs.hopecard-web.result == 'skipped')
+      needs.bayanihub-web.result != 'cancelled' &&
+      needs.damayan-web.result != 'cancelled' &&
+      needs.hopecard-web.result != 'cancelled'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code

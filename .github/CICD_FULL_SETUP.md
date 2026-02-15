@@ -27,112 +27,123 @@
 ```
 ImplementSprint (GitHub Org)
 │
-├── ThriniThrive          3 frontend repos + 1 backend repo      = 4 repos
-├── GCkaSoho              2 frontend repos + 1 mobile + 1 backend = 4 repos
-├── Crystal Gems          2 frontend repos + 1 backend repo      = 3 repos
+├── ThriniThrive          1 frontend monorepo (3 dirs) + 1 backend = 2 repos
+├── GCkaSoho              1 frontend monorepo (2 dirs) + 1 mobile + 1 backend = 3 repos
+├── Crystal Gems          1 frontend monorepo (2 dirs) + 1 backend = 2 repos
 ├── Blues Clues            1 frontend repo  + 1 backend repo      = 2 repos
 ├── ServEase              1 mobile repo    + 1 backend repo       = 2 repos
 ├── CapusOne              1 frontend repo  + 1 mobile + 1 backend = 3 repos
 └── APICenter             1 integration/backend repo              = 1 repo
-                                                          TOTAL = 19 repos
+                                                          TOTAL = 15 repos
 ```
+
+> **Monorepo pattern:** When a tribe has multiple frontends, they live as **subdirectories in one repo** (not separate repos). For example, `TriniThrive-Frontend` contains `BayaniHub-Web/`, `DAMAYAN-Web/`, and `HopeCard-Web/` — all in one repository.
 
 ### Pipeline Architecture
 
 ```
 master-pipeline.yml  (per repo — triggers everything)
   │
+  ├─ [Multi-system only] detect-changes  (dorny/paths-filter — skip unchanged dirs)
+  │
   ├─ front-end-workflow.yml   OR   backend-workflow.yml   OR   mobile-workflow.yml
   │    │                             │                           │
   │    ├─ frontend-tests.yml         ├─ backend-tests.yml        ├─ mobile-tests.yml
   │    ├─ lint-check.yml             ├─ lint-check.yml           ├─ lint-check.yml
   │    ├─ security-scan.yml          ├─ security-scan.yml        ├─ security-scan.yml
-  │    ├─ sonarcloud-scan.yml        ├─ sonarcloud-scan.yml      ├─ sonarcloud-scan.yml
   │    └─ Build (vite build)         ├─ docker-build.yml         └─ Android APK (optional)
-  │                                  └─ Deploy                 
+  │                                  └─ Deploy
   │
-  ├─ deploy-staging.yml      (uat → deploy to UAT | prod → deploy to Prod)
-  └─ production-gate.yml     (prod only, manual approval)
+  ├─ SonarCloud scan            (runs ONCE per repo — monorepo-level analysis)
+  ├─ deploy-staging.yml         (uat → deploy to UAT | prod → deploy to Prod)
+  └─ production-gate.yml        (prod only, manual approval BEFORE deploy)
 ```
+
+> **SonarCloud:** Runs once at the **repo level** (not per sub-project) to avoid CE task collisions. Coverage artifacts from all sub-projects are downloaded and analyzed in one scan.
+
+> **Production Gate:** Runs **before** deploying to prod (not after). Flow: CI → Gate → Deploy.
 
 ### Branching Strategy
 
 ```
-  test branch        uat branch          prod branch
-  ─────────────      ──────────────      ──────────────
-  CI only            CI + Deploy UAT     CI + Deploy Prod
-  (tests, lint,      (same as test,      (same as uat,
-   security,          PLUS deploy to      PLUS production
-   sonar, build)      UAT environment)    gate approval)
+  feature branch     test branch        uat branch          prod branch
+  ──────────────     ─────────────      ──────────────      ──────────────
+  Development        CI only            CI + Deploy UAT     CI + Deploy Prod
+  (local work,       (tests, lint,      (same as test,      (same as uat,
+   PR → test)        security,          PLUS deploy to      PLUS production
+                     sonar, build)      UAT environment)    gate approval)
 
-  Push flow:   test ──merge──▶ uat ──merge──▶ prod
+  Push flow:   feature ──PR──▶ test ──merge──▶ uat ──merge──▶ prod
 ```
 
 | Branch | What Runs | Deploy? | Approval? |
 |--------|-----------|---------|----------|
 | `test` | Tests + Lint + Security + SonarCloud + Build | No | No |
 | `uat`  | All CI + Deploy to UAT environment | Yes (UAT) | No |
-| `prod` | All CI + Deploy to Prod + Production Gate | Yes (Prod) | Yes |
+| `prod` | All CI + Production Gate + Deploy to Prod | Yes (Prod) | Yes |
+
+### Developer Workflow
+
+1. Dev creates `feature/my-feature` from `test`
+2. Dev pushes commits, opens PR → `test`
+3. CI runs on the PR — reviewer sees green/red checks
+4. Merge to `test` — CI confirms integration is clean
+5. When features are ready, PR `test` → `uat` — QA tests on UAT environment
+6. After QA approval, PR `uat` → `prod` — requires manual gate approval → deploys to production
 
 ---
 
 ## 2. Repository Inventory
 
-### ThriniThrive (4 repos)
+### ThriniThrive (2 repos)
 
-| Repository | Type | Systems | system-dir | system-name |
-|---|---|---|---|---|
-| `ThriniThrive-Frontend-1` | Frontend | Single | `"."` | *(project name)* |
-| `ThriniThrive-Frontend-2` | Frontend | Single | `"."` | *(project name)* |
-| `ThriniThrive-Frontend-3` | Frontend | Single | `"."` | *(project name)* |
-| `ThriniThrive-Backend` | Backend | Single | `"."` | *(project name)* |
+| Repository | Type | Structure | Sub-projects |
+|---|---|---|---|
+| `TriniThrive-Frontend` | Frontend | **Monorepo** (3 dirs) | `BayaniHub-Web/`, `DAMAYAN-Web/`, `HopeCard-Web/` |
+| `ThriniThrive-Backend` | Backend | Single | — |
 
-> **Note:** If all 3 frontends are in one repo (like Tribe3), use subdirectories with `system-dir: SubdirName`. If they are separate repos, each uses `system-dir: "."`.
+### GCkaSoho (3 repos)
 
-### GCkaSoho (4 repos)
+| Repository | Type | Structure | Sub-projects |
+|---|---|---|---|
+| `GCkaSoho-Frontend` | Frontend | **Monorepo** (2 dirs) | *(2 system directories)* |
+| `GCkaSoho-Mobile` | Mobile | Single | — |
+| `GCkaSoho-Backend` | Backend | Single | — |
 
-| Repository | Type | Systems | system-dir | system-name |
-|---|---|---|---|---|
-| `GCkaSoho-Frontend-1` | Frontend | Single | `"."` | *(project name)* |
-| `GCkaSoho-Frontend-2` | Frontend | Single | `"."` | *(project name)* |
-| `GCkaSoho-Mobile` | Mobile | Single | `"."` | *(project name)* |
-| `GCkaSoho-Backend` | Backend | Single | `"."` | *(project name)* |
+### Crystal Gems (2 repos)
 
-### Crystal Gems (3 repos)
-
-| Repository | Type | Systems | system-dir | system-name |
-|---|---|---|---|---|
-| `CrystalGems-Frontend-1` | Frontend | Single | `"."` | *(project name)* |
-| `CrystalGems-Frontend-2` | Frontend | Single | `"."` | *(project name)* |
-| `CrystalGems-Backend` | Backend | Single | `"."` | *(project name)* |
+| Repository | Type | Structure | Sub-projects |
+|---|---|---|---|
+| `CrystalGems-Frontend` | Frontend | **Monorepo** (2 dirs) | *(2 system directories)* |
+| `CrystalGems-Backend` | Backend | Single | — |
 
 ### Blues Clues (2 repos)
 
-| Repository | Type | Systems | system-dir | system-name |
-|---|---|---|---|---|
-| `BluesClues-Frontend` | Frontend | Single | `"."` | *(project name)* |
-| `BluesClues-Backend` | Backend | Single | `"."` | *(project name)* |
+| Repository | Type | Structure | Sub-projects |
+|---|---|---|---|
+| `BluesClues-Frontend` | Frontend | Single | — |
+| `BluesClues-Backend` | Backend | Single | — |
 
 ### ServEase (2 repos)
 
-| Repository | Type | Systems | system-dir | system-name |
-|---|---|---|---|---|
-| `ServEase-Mobile` | Mobile | Single | `"."` | *(project name)* |
-| `ServEase-Backend` | Backend | Single | `"."` | *(project name)* |
+| Repository | Type | Structure | Sub-projects |
+|---|---|---|---|
+| `ServEase-Mobile` | Mobile | Single | — |
+| `ServEase-Backend` | Backend | Single | — |
 
 ### CapusOne (3 repos)
 
-| Repository | Type | Systems | system-dir | system-name |
-|---|---|---|---|---|
-| `CapusOne-Frontend` | Frontend | Single | `"."` | *(project name)* |
-| `CapusOne-Mobile` | Mobile | Single | `"."` | *(project name)* |
-| `CapusOne-Backend` | Backend | Single | `"."` | *(project name)* |
+| Repository | Type | Structure | Sub-projects |
+|---|---|---|---|
+| `CapusOne-Frontend` | Frontend | Single | — |
+| `CapusOne-Mobile` | Mobile | Single | — |
+| `CapusOne-Backend` | Backend | Single | — |
 
 ### APICenter (1 repo)
 
-| Repository | Type | Systems | system-dir | system-name |
-|---|---|---|---|---|
-| `APICenter` | Backend (Integration) | Single | `"."` | `APICenter` |
+| Repository | Type | Structure | Sub-projects |
+|---|---|---|---|
+| `APICenter` | Backend (Integration) | Single | — |
 
 ---
 
@@ -145,7 +156,7 @@ Set these **once** at the org level (**Settings → Secrets and variables → Ac
 | `SONAR_TOKEN` | SonarCloud authentication token | All repos |
 | `SONAR_ORGANIZATION` | `implementsprint` | All repos |
 
-> These are the same across all tribes. Set them at the org level to avoid configuring them 19 times.
+> These are the same across all tribes. Set them at the org level to avoid configuring them 15 times.
 
 ---
 
@@ -159,6 +170,8 @@ Each repo needs **one** repo-level secret (since the project key is unique per r
 
 See [Section 11](#11-sonarcloud-project-keys) for the full list of project keys.
 
+> **Important:** Monorepos with multiple frontends still use **one** SonarCloud project key per repo. The single scan covers all sub-project directories.
+
 ---
 
 ## 5. Workflow Files to Copy
@@ -169,14 +182,15 @@ Copy these files into `.github/workflows/`:
 
 | File | Purpose |
 |---|---|
-| `front-end-workflow.yml` | Frontend orchestrator |
+| `front-end-workflow.yml` | Frontend orchestrator (tests→lint→security→build) |
 | `frontend-tests.yml` | Vitest unit tests + coverage |
 | `lint-check.yml` | ESLint checks |
 | `security-scan.yml` | npm audit + Gitleaks |
-| `sonarcloud-scan.yml` | SonarCloud quality gate |
 | `deploy-staging.yml` | Staging deployment |
 | `production-gate.yml` | Production approval gate |
 | `governance-check.yml` | Coverage governance |
+
+> **Note:** `sonarcloud-scan.yml` is optional. For monorepos, SonarCloud runs **inline in master-pipeline.yml** (not as a reusable workflow) to avoid parallel scan collisions. For single-system repos, you can use the reusable workflow or run it inline.
 
 Then create your own `master-pipeline.yml` (see [Section 10](#10-all-master-pipelineyml-templates)).
 
@@ -211,19 +225,42 @@ Each frontend system (at root or subdirectory) needs these files:
 
 ### Required File Structure
 
+**Single-system repo (project at root):**
+
 ```
-your-frontend-repo/
+Tribe-Frontend/
 ├── .github/workflows/         ← all reusable workflow files + master-pipeline.yml
 ├── src/
 │   ├── App.jsx
 │   └── main.jsx
 ├── tests/
 │   └── ui.test.js
-├── package.json               ← correct scripts + devDependencies
+├── package.json
 ├── package-lock.json          ← REQUIRED (run npm install to generate)
 ├── vitest.config.ts           ← jsdom + v8 coverage
 ├── eslint.config.js           ← ESLint v9 flat config
+├── sonar-project.properties   ← SonarCloud config (sources, tests, exclusions)
 └── index.html                 ← Vite entry point
+```
+
+**Multi-system monorepo (multiple frontends as subdirectories):**
+
+```
+Tribe-Frontend/
+├── .github/workflows/
+├── SystemA-Web/
+│   ├── src/
+│   ├── tests/
+│   ├── package.json
+│   ├── package-lock.json
+│   ├── vitest.config.ts
+│   ├── eslint.config.js
+│   └── index.html
+├── SystemB-Web/
+│   ├── ... (same structure)
+├── SystemC-Web/
+│   ├── ... (same structure)
+└── sonar-project.properties   ← at REPO ROOT, covers ALL sub-projects
 ```
 
 ### package.json
@@ -316,6 +353,35 @@ export default [
 ];
 ```
 
+### sonar-project.properties (single-system)
+
+```properties
+sonar.sources=src
+sonar.tests=tests
+sonar.javascript.lcov.reportPaths=coverage/lcov.info
+sonar.coverage.exclusions=**/tests/**,**/*.test.*,**/node_modules/**
+sonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/**
+```
+
+### sonar-project.properties (multi-system monorepo)
+
+```properties
+# Sources — comma-separated list of all sub-project src directories
+sonar.sources=SystemA-Web/src,SystemB-Web/src,SystemC-Web/src
+
+# Tests
+sonar.tests=SystemA-Web/tests,SystemB-Web/tests,SystemC-Web/tests
+
+# Coverage — merge coverage from all sub-projects
+sonar.javascript.lcov.reportPaths=SystemA-Web/coverage/lcov.info,SystemB-Web/coverage/lcov.info,SystemC-Web/coverage/lcov.info
+
+# Exclusions
+sonar.coverage.exclusions=**/tests/**,**/*.test.*,**/node_modules/**
+sonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/**
+```
+
+> **Note:** `sonar.organization` and `sonar.projectKey` are NOT in the properties file — they come from GitHub Secrets and are passed via CLI args in the workflow.
+
 ### index.html
 
 ```html
@@ -371,6 +437,7 @@ your-backend-repo/
 ├── package-lock.json          ← REQUIRED
 ├── jest.config.js             ← Jest config with coverage
 ├── eslint.config.js           ← ESLint v9 flat config
+├── sonar-project.properties   ← SonarCloud config
 └── Dockerfile                 ← (optional) for Docker build
 ```
 
@@ -494,6 +561,7 @@ your-mobile-repo/
 ├── package-lock.json          ← REQUIRED
 ├── jest.config.js
 ├── eslint.config.js
+├── sonar-project.properties
 └── index.js                    ← React Native entry point
 ```
 
@@ -609,7 +677,7 @@ npm run lint      # verify eslint passes
 APICenter is a backend/integration repo. Follow the **Backend Repo Setup** (Section 7).
 
 Additional considerations for an integration repo:
-- May run integration tests against other tribe APIs  
+- May run integration tests against other tribe APIs
 - Set `integration-test-command` in the master-pipeline if needed
 - May build a Docker image for deployment
 
@@ -622,6 +690,7 @@ APICenter/
 ├── package-lock.json
 ├── jest.config.js
 ├── eslint.config.js
+├── sonar-project.properties
 └── Dockerfile
 ```
 
@@ -631,7 +700,7 @@ APICenter/
 
 ### Template A: Single-System Frontend
 
-**Used by:** ThriniThrive-Frontend-1, ThriniThrive-Frontend-2, ThriniThrive-Frontend-3, GCkaSoho-Frontend-1, GCkaSoho-Frontend-2, CrystalGems-Frontend-1, CrystalGems-Frontend-2, BluesClues-Frontend, CapusOne-Frontend
+**Used by:** BluesClues-Frontend, CapusOne-Frontend
 
 ```yaml
 name: "Master Pipeline Orchestrator"
@@ -661,6 +730,31 @@ jobs:
       system-name: REPLACE_WITH_SYSTEM_NAME
     secrets: inherit
 
+  # ── Stage 1.5: SonarCloud ──
+  sonarcloud:
+    name: "SonarCloud Analysis"
+    needs: [frontend]
+    if: always() && needs.frontend.result != 'cancelled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        if: needs.frontend.result == 'success'
+        with:
+          name: REPLACE_WITH_SYSTEM_NAME-coverage
+          path: coverage
+        continue-on-error: true
+      - uses: SonarSource/sonarqube-scan-action@v5.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+
   # ── Stage 2: Deploy to UAT (uat branch only) ──
   deploy-uat:
     name: "UAT — REPLACE_WITH_SYSTEM_NAME"
@@ -675,10 +769,21 @@ jobs:
       deploy-environment: uat
     secrets: inherit
 
-  # ── Stage 3: Deploy to Prod (prod branch only) ──
+  # ── Stage 3A: Production Gate (prod branch, BEFORE deploy) ──
+  production-gate:
+    name: "Production Gate"
+    needs: [frontend]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/production-gate.yml
+    with:
+      system-dir: "."
+      app-type: web
+    secrets: inherit
+
+  # ── Stage 3B: Deploy to Prod (after gate approval) ──
   deploy-prod:
     name: "Prod — REPLACE_WITH_SYSTEM_NAME"
-    needs: [frontend]
+    needs: [production-gate]
     if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
     uses: ./.github/workflows/deploy-staging.yml
     with:
@@ -687,17 +792,6 @@ jobs:
       app-type: web
       artifact-name: REPLACE_WITH_SYSTEM_NAME-web-build
       deploy-environment: prod
-    secrets: inherit
-
-  # ── Stage 4: Production Gate (prod branch only) ──
-  production-gate:
-    name: "Production Gate"
-    needs: [deploy-prod]
-    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
-    uses: ./.github/workflows/production-gate.yml
-    with:
-      system-dir: "."
-      app-type: web
     secrets: inherit
 
   pipeline-summary:
@@ -748,6 +842,31 @@ jobs:
       docker-image-name: REPLACE_WITH_IMAGE_NAME
     secrets: inherit
 
+  # ── Stage 1.5: SonarCloud ──
+  sonarcloud:
+    name: "SonarCloud Analysis"
+    needs: [backend]
+    if: always() && needs.backend.result != 'cancelled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        if: needs.backend.result == 'success'
+        with:
+          name: REPLACE_WITH_SYSTEM_NAME-coverage
+          path: coverage
+        continue-on-error: true
+      - uses: SonarSource/sonarqube-scan-action@v5.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+
   # ── Stage 2: Deploy to UAT (uat branch only) ──
   deploy-uat:
     name: "UAT — REPLACE_WITH_SYSTEM_NAME"
@@ -762,10 +881,21 @@ jobs:
       deploy-environment: uat
     secrets: inherit
 
-  # ── Stage 3: Deploy to Prod (prod branch only) ──
+  # ── Stage 3A: Production Gate (prod branch, BEFORE deploy) ──
+  production-gate:
+    name: "Production Gate"
+    needs: [backend]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/production-gate.yml
+    with:
+      system-dir: "."
+      app-type: api
+    secrets: inherit
+
+  # ── Stage 3B: Deploy to Prod (after gate approval) ──
   deploy-prod:
     name: "Prod — REPLACE_WITH_SYSTEM_NAME"
-    needs: [backend]
+    needs: [production-gate]
     if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
     uses: ./.github/workflows/deploy-staging.yml
     with:
@@ -774,17 +904,6 @@ jobs:
       app-type: api
       artifact-name: REPLACE_WITH_SYSTEM_NAME-docker-image
       deploy-environment: prod
-    secrets: inherit
-
-  # ── Stage 4: Production Gate (prod branch only) ──
-  production-gate:
-    name: "Production Gate"
-    needs: [deploy-prod]
-    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
-    uses: ./.github/workflows/production-gate.yml
-    with:
-      system-dir: "."
-      app-type: api
     secrets: inherit
 
   pipeline-summary:
@@ -835,6 +954,31 @@ jobs:
       build-variant: assembleRelease
     secrets: inherit
 
+  # ── Stage 1.5: SonarCloud ──
+  sonarcloud:
+    name: "SonarCloud Analysis"
+    needs: [mobile]
+    if: always() && needs.mobile.result != 'cancelled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        if: needs.mobile.result == 'success'
+        with:
+          name: REPLACE_WITH_SYSTEM_NAME-coverage
+          path: coverage
+        continue-on-error: true
+      - uses: SonarSource/sonarqube-scan-action@v5.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+
   # ── Stage 2: Deploy to UAT (uat branch only) ──
   deploy-uat:
     name: "UAT — REPLACE_WITH_SYSTEM_NAME"
@@ -849,10 +993,21 @@ jobs:
       deploy-environment: uat
     secrets: inherit
 
-  # ── Stage 3: Deploy to Prod (prod branch only) ──
+  # ── Stage 3A: Production Gate (prod branch, BEFORE deploy) ──
+  production-gate:
+    name: "Production Gate"
+    needs: [mobile]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/production-gate.yml
+    with:
+      system-dir: "."
+      app-type: mobile
+    secrets: inherit
+
+  # ── Stage 3B: Deploy to Prod (after gate approval) ──
   deploy-prod:
     name: "Prod — REPLACE_WITH_SYSTEM_NAME"
-    needs: [mobile]
+    needs: [production-gate]
     if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
     uses: ./.github/workflows/deploy-staging.yml
     with:
@@ -861,17 +1016,6 @@ jobs:
       app-type: mobile
       artifact-name: REPLACE_WITH_SYSTEM_NAME-android-apk
       deploy-environment: prod
-    secrets: inherit
-
-  # ── Stage 4: Production Gate (prod branch only) ──
-  production-gate:
-    name: "Production Gate"
-    needs: [deploy-prod]
-    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
-    uses: ./.github/workflows/production-gate.yml
-    with:
-      system-dir: "."
-      app-type: mobile
     secrets: inherit
 
   pipeline-summary:
@@ -888,6 +1032,262 @@ jobs:
 
 ---
 
+### Template D: Multi-System Frontend Monorepo
+
+**Used by:** TriniThrive-Frontend, GCkaSoho-Frontend, CrystalGems-Frontend
+
+> For tribes with **multiple frontends in one repo**. Each frontend lives in its own subdirectory.
+> Uses `dorny/paths-filter` to skip unchanged sub-projects. SonarCloud runs once at the repo level.
+
+Replace `SYSTEM_A`, `SYSTEM_B`, `SYSTEM_C` with your actual directory/system names (e.g., `BayaniHub-Web`, `DAMAYAN-Web`, `HopeCard-Web`).
+
+```yaml
+name: "Master Pipeline Orchestrator"
+
+on:
+  push:
+    branches: [test, uat, prod]
+  pull_request:
+    branches: [test, uat, prod]
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
+
+concurrency:
+  group: master-pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Stage 0: Detect which sub-projects changed ──
+  detect-changes:
+    name: "Detect Changed Projects"
+    runs-on: ubuntu-latest
+    outputs:
+      system-a: ${{ steps.filter.outputs.system-a }}
+      system-b: ${{ steps.filter.outputs.system-b }}
+      system-c: ${{ steps.filter.outputs.system-c }}
+      shared: ${{ steps.filter.outputs.shared }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            system-a:
+              - 'SYSTEM_A/**'
+            system-b:
+              - 'SYSTEM_B/**'
+            system-c:
+              - 'SYSTEM_C/**'
+            shared:
+              - '.github/**'
+              - 'package.json'
+              - 'sonar-project.properties'
+
+  # ── Stage 1: CI — each sub-project runs in parallel ──
+  system-a:
+    name: "SYSTEM_A Pipeline"
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.system-a == 'true' || needs.detect-changes.outputs.shared == 'true'
+    uses: ./.github/workflows/front-end-workflow.yml
+    with:
+      system-dir: SYSTEM_A
+      system-name: SYSTEM_A
+    secrets: inherit
+
+  system-b:
+    name: "SYSTEM_B Pipeline"
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.system-b == 'true' || needs.detect-changes.outputs.shared == 'true'
+    uses: ./.github/workflows/front-end-workflow.yml
+    with:
+      system-dir: SYSTEM_B
+      system-name: SYSTEM_B
+    secrets: inherit
+
+  system-c:
+    name: "SYSTEM_C Pipeline"
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.system-c == 'true' || needs.detect-changes.outputs.shared == 'true'
+    uses: ./.github/workflows/front-end-workflow.yml
+    with:
+      system-dir: SYSTEM_C
+      system-name: SYSTEM_C
+    secrets: inherit
+
+  # ── Stage 1.5: SonarCloud (single monorepo scan) ──
+  sonarcloud:
+    name: "SonarCloud — Monorepo Analysis"
+    needs: [system-a, system-b, system-c]
+    if: >-
+      always() &&
+      needs.system-a.result != 'cancelled' &&
+      needs.system-b.result != 'cancelled' &&
+      needs.system-c.result != 'cancelled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        if: needs.system-a.result == 'success'
+        with:
+          name: SYSTEM_A-coverage
+          path: SYSTEM_A/coverage
+        continue-on-error: true
+      - uses: actions/download-artifact@v4
+        if: needs.system-b.result == 'success'
+        with:
+          name: SYSTEM_B-coverage
+          path: SYSTEM_B/coverage
+        continue-on-error: true
+      - uses: actions/download-artifact@v4
+        if: needs.system-c.result == 'success'
+        with:
+          name: SYSTEM_C-coverage
+          path: SYSTEM_C/coverage
+        continue-on-error: true
+      - uses: SonarSource/sonarqube-scan-action@v5.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+
+  # ── Stage 2: Deploy to UAT (uat branch only, parallel) ──
+  deploy-uat-system-a:
+    name: "UAT — SYSTEM_A"
+    needs: [system-a]
+    if: |
+      always() &&
+      github.ref == 'refs/heads/uat' && github.event_name == 'push' &&
+      needs.system-a.result == 'success'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: SYSTEM_A
+      system-name: SYSTEM_A
+      app-type: web
+      artifact-name: SYSTEM_A-web-build
+      deploy-environment: uat
+    secrets: inherit
+
+  deploy-uat-system-b:
+    name: "UAT — SYSTEM_B"
+    needs: [system-b]
+    if: |
+      always() &&
+      github.ref == 'refs/heads/uat' && github.event_name == 'push' &&
+      needs.system-b.result == 'success'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: SYSTEM_B
+      system-name: SYSTEM_B
+      app-type: web
+      artifact-name: SYSTEM_B-web-build
+      deploy-environment: uat
+    secrets: inherit
+
+  deploy-uat-system-c:
+    name: "UAT — SYSTEM_C"
+    needs: [system-c]
+    if: |
+      always() &&
+      github.ref == 'refs/heads/uat' && github.event_name == 'push' &&
+      needs.system-c.result == 'success'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: SYSTEM_C
+      system-name: SYSTEM_C
+      app-type: web
+      artifact-name: SYSTEM_C-web-build
+      deploy-environment: uat
+    secrets: inherit
+
+  # ── Stage 3A: Production Gate (prod branch, BEFORE deploy) ──
+  production-gate:
+    name: "Production Readiness Gate"
+    needs: [system-a, system-b, system-c]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/prod' && github.event_name == 'push' &&
+      needs.system-a.result != 'cancelled' &&
+      needs.system-b.result != 'cancelled' &&
+      needs.system-c.result != 'cancelled'
+    uses: ./.github/workflows/production-gate.yml
+    with:
+      system-dir: Tribe-Frontend
+      app-type: web
+    secrets: inherit
+
+  # ── Stage 3B: Deploy to Prod (after gate approval, parallel) ──
+  deploy-prod-system-a:
+    name: "Prod — SYSTEM_A"
+    needs: [production-gate]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: SYSTEM_A
+      system-name: SYSTEM_A
+      app-type: web
+      artifact-name: SYSTEM_A-web-build
+      deploy-environment: prod
+    secrets: inherit
+
+  deploy-prod-system-b:
+    name: "Prod — SYSTEM_B"
+    needs: [production-gate]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: SYSTEM_B
+      system-name: SYSTEM_B
+      app-type: web
+      artifact-name: SYSTEM_B-web-build
+      deploy-environment: prod
+    secrets: inherit
+
+  deploy-prod-system-c:
+    name: "Prod — SYSTEM_C"
+    needs: [production-gate]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: SYSTEM_C
+      system-name: SYSTEM_C
+      app-type: web
+      artifact-name: SYSTEM_C-web-build
+      deploy-environment: prod
+    secrets: inherit
+
+  pipeline-summary:
+    name: "Pipeline Summary"
+    needs: [system-a, system-b, system-c]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Results
+        run: |
+          echo "SYSTEM_A: ${{ needs.system-a.result }}"
+          echo "SYSTEM_B: ${{ needs.system-b.result }}"
+          echo "SYSTEM_C: ${{ needs.system-c.result }}"
+          FAILED=false
+          if [[ "${{ needs.system-a.result }}" == "failure" ]]; then FAILED=true; fi
+          if [[ "${{ needs.system-b.result }}" == "failure" ]]; then FAILED=true; fi
+          if [[ "${{ needs.system-c.result }}" == "failure" ]]; then FAILED=true; fi
+          if [ "$FAILED" = "true" ]; then echo "❌ Failed!"; exit 1; fi
+          echo "✅ All passed!"
+```
+
+> **Adapting for 2 sub-projects:** Remove all `system-c` / `SYSTEM_C` references. The pattern is the same for any number of subdirectories.
+
+---
+
 ## 11. SonarCloud Project Keys
 
 Create each project in [sonarcloud.io](https://sonarcloud.io) under the `implementsprint` organization.
@@ -896,29 +1296,25 @@ Set the `SONAR_PROJECT_KEY` repo secret to the corresponding value:
 
 ### ThriniThrive
 
-| Repository | `SONAR_PROJECT_KEY` |
-|---|---|
-| ThriniThrive-Frontend-1 | `ImplementSprint_ThriniThrive-Frontend-1` |
-| ThriniThrive-Frontend-2 | `ImplementSprint_ThriniThrive-Frontend-2` |
-| ThriniThrive-Frontend-3 | `ImplementSprint_ThriniThrive-Frontend-3` |
-| ThriniThrive-Backend | `ImplementSprint_ThriniThrive-Backend` |
+| Repository | `SONAR_PROJECT_KEY` | Notes |
+|---|---|---|
+| TriniThrive-Frontend | `ImplementSprint_TriniThrive-Frontend` | Covers BayaniHub-Web + DAMAYAN-Web + HopeCard-Web |
+| ThriniThrive-Backend | `ImplementSprint_ThriniThrive-Backend` | — |
 
 ### GCkaSoho
 
-| Repository | `SONAR_PROJECT_KEY` |
-|---|---|
-| GCkaSoho-Frontend-1 | `ImplementSprint_GCkaSoho-Frontend-1` |
-| GCkaSoho-Frontend-2 | `ImplementSprint_GCkaSoho-Frontend-2` |
-| GCkaSoho-Mobile | `ImplementSprint_GCkaSoho-Mobile` |
-| GCkaSoho-Backend | `ImplementSprint_GCkaSoho-Backend` |
+| Repository | `SONAR_PROJECT_KEY` | Notes |
+|---|---|---|
+| GCkaSoho-Frontend | `ImplementSprint_GCkaSoho-Frontend` | Covers both frontend systems |
+| GCkaSoho-Mobile | `ImplementSprint_GCkaSoho-Mobile` | — |
+| GCkaSoho-Backend | `ImplementSprint_GCkaSoho-Backend` | — |
 
 ### Crystal Gems
 
-| Repository | `SONAR_PROJECT_KEY` |
-|---|---|
-| CrystalGems-Frontend-1 | `ImplementSprint_CrystalGems-Frontend-1` |
-| CrystalGems-Frontend-2 | `ImplementSprint_CrystalGems-Frontend-2` |
-| CrystalGems-Backend | `ImplementSprint_CrystalGems-Backend` |
+| Repository | `SONAR_PROJECT_KEY` | Notes |
+|---|---|---|
+| CrystalGems-Frontend | `ImplementSprint_CrystalGems-Frontend` | Covers both frontend systems |
+| CrystalGems-Backend | `ImplementSprint_CrystalGems-Backend` | — |
 
 ### Blues Clues
 
@@ -948,7 +1344,7 @@ Set the `SONAR_PROJECT_KEY` repo secret to the corresponding value:
 |---|---|
 | APICenter | `ImplementSprint_APICenter` |
 
-> **SonarCloud project key format:** `OrgName_RepoName` — this is the default when you import a GitHub repo into SonarCloud.
+> **SonarCloud project key format:** `OrgName_RepoName` — this is the default when you import a GitHub repo into SonarCloud. Monorepos get **one** project key per repo (not per sub-project).
 
 ---
 
@@ -979,9 +1375,9 @@ In GitHub repo **Settings → Branches**, configure:
 
 - [ ] Set org secret `SONAR_TOKEN` at **ImplementSprint** → Settings → Secrets
 - [ ] Set org secret `SONAR_ORGANIZATION` = `implementsprint` at org level
-- [ ] Create all 19 SonarCloud projects at sonarcloud.io
+- [ ] Create all 15 SonarCloud projects at sonarcloud.io
 
-### Step 2: Per-Repo Setup (repeat 19 times)
+### Step 2: Per-Repo Setup (repeat 15 times)
 
 For each repository:
 
@@ -989,44 +1385,42 @@ For each repository:
 - [ ] **2. Set `SONAR_PROJECT_KEY`** repo secret (see Section 11)
 - [ ] **3. Copy workflow files** to `.github/workflows/` (see Section 5)
 - [ ] **4. Create `master-pipeline.yml`** using the correct template (see Section 10):
-  - Frontend → Template A
-  - Backend → Template B
-  - Mobile → Template C
-- [ ] **5. Replace all `REPLACE_WITH_SYSTEM_NAME`** placeholders in master-pipeline.yml
+  - Single frontend → Template A
+  - Single backend → Template B
+  - Single mobile → Template C
+  - **Multi-frontend monorepo → Template D**
+- [ ] **5. Replace all placeholders** (`REPLACE_WITH_SYSTEM_NAME`, `SYSTEM_A`, `SYSTEM_B`, `SYSTEM_C`)
 - [ ] **6. Add source files** (`src/`, `tests/`, config files — see Sections 6/7/8)
-- [ ] **7. Run `npm install`** to generate `package-lock.json`
-- [ ] **8. Verify locally:**
+- [ ] **7. For monorepos:** create `sonar-project.properties` at repo root with all sub-project paths
+- [ ] **8. Run `npm install`** in each system dir to generate `package-lock.json`
+- [ ] **9. Verify locally:**
   - `npm test` passes
   - `npm run lint` passes
   - `npm run build` works (frontend only)
-- [ ] **9. Create branches** — `test`, `uat`, `prod` (see Step 0)
-- [ ] **10. Push to `test` branch** — CI pipeline should trigger (tests + lint + sonar, no deploy)
-- [ ] **11. Merge `test` → `uat`** — CI + UAT deployment should trigger
-- [ ] **12. Merge `uat` → `prod`** — CI + Prod deployment + production gate should trigger
+- [ ] **10. Create branches** — `test`, `uat`, `prod` (see Step 0)
+- [ ] **11. Push to `test` branch** — CI pipeline should trigger (tests + lint + sonar, no deploy)
+- [ ] **12. Merge `test` → `uat`** — CI + UAT deployment should trigger
+- [ ] **13. Merge `uat` → `prod`** — CI + Production gate + Prod deployment should trigger
 
 ### Quick Reference: Which Template for Each Repo
 
-| Repo | Template |
-|---|---|
-| ThriniThrive-Frontend-1 | A (Frontend) |
-| ThriniThrive-Frontend-2 | A (Frontend) |
-| ThriniThrive-Frontend-3 | A (Frontend) |
-| ThriniThrive-Backend | B (Backend) |
-| GCkaSoho-Frontend-1 | A (Frontend) |
-| GCkaSoho-Frontend-2 | A (Frontend) |
-| GCkaSoho-Mobile | C (Mobile) |
-| GCkaSoho-Backend | B (Backend) |
-| CrystalGems-Frontend-1 | A (Frontend) |
-| CrystalGems-Frontend-2 | A (Frontend) |
-| CrystalGems-Backend | B (Backend) |
-| BluesClues-Frontend | A (Frontend) |
-| BluesClues-Backend | B (Backend) |
-| ServEase-Mobile | C (Mobile) |
-| ServEase-Backend | B (Backend) |
-| CapusOne-Frontend | A (Frontend) |
-| CapusOne-Mobile | C (Mobile) |
-| CapusOne-Backend | B (Backend) |
-| APICenter | B (Backend) |
+| Repo | Template | Sub-projects |
+|---|---|---|
+| TriniThrive-Frontend | **D (Multi-Frontend Monorepo)** | BayaniHub-Web, DAMAYAN-Web, HopeCard-Web |
+| ThriniThrive-Backend | B (Backend) | — |
+| GCkaSoho-Frontend | **D (Multi-Frontend Monorepo)** | *(2 systems)* |
+| GCkaSoho-Mobile | C (Mobile) | — |
+| GCkaSoho-Backend | B (Backend) | — |
+| CrystalGems-Frontend | **D (Multi-Frontend Monorepo)** | *(2 systems)* |
+| CrystalGems-Backend | B (Backend) | — |
+| BluesClues-Frontend | A (Frontend) | — |
+| BluesClues-Backend | B (Backend) | — |
+| ServEase-Mobile | C (Mobile) | — |
+| ServEase-Backend | B (Backend) | — |
+| CapusOne-Frontend | A (Frontend) | — |
+| CapusOne-Mobile | C (Mobile) | — |
+| CapusOne-Backend | B (Backend) | — |
+| APICenter | B (Backend) | — |
 
 ---
 
@@ -1038,9 +1432,13 @@ For each repository:
 | `vitest: command not found` | Missing devDependency | Add `vitest` + `@vitest/coverage-v8` to devDependencies |
 | `jest: command not found` | Missing devDependency | Add `jest` to devDependencies |
 | `Cannot find module 'jsdom'` | Missing devDependency | Add `jsdom` to devDependencies (frontend only) |
+| SonarCloud "CE Task failed" | Multiple parallel scans on same project key | Use single monorepo scan (Template D) instead of per-sub-project scans |
 | SonarCloud "indexed twice" | `sonar.sources` and `sonar.tests` overlap | Sources = `src`, Tests = `tests` (separate dirs) |
+| SonarCloud "Project not found" | Wrong project key or org | Verify `SONAR_PROJECT_KEY` and `SONAR_ORGANIZATION` secrets match sonarcloud.io |
+| SonarCloud job skipped | `if` condition too strict or upstream cancelled | Use `!= 'cancelled'` instead of `== 'success'` in the condition |
 | ESLint "config not found" | No ESLint config | Create `eslint.config.js` |
 | Build fails "no index.html" | Missing Vite entry | Add `index.html` at system root (frontend only) |
 | Docker build fails | Missing `Dockerfile` | Create Dockerfile in repo root (backend only) |
 | Android build fails | Missing `android/gradlew` | Ensure React Native android dir exists (mobile only) |
 | Secret not found | Repo secret not set | Go to repo Settings → Secrets → add missing secret |
+| Production gate after deploy | Wrong `needs` order in template | Gate must `needs: [CI]`, deploy must `needs: [production-gate]` |

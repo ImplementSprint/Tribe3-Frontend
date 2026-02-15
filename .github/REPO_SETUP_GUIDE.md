@@ -9,7 +9,7 @@
 1. [GitHub Secrets (Required)](#1-github-secrets-required)
 2. [Branching Strategy](#2-branching-strategy)
 3. [Single-System Repo (root directory)](#3-single-system-repo-root-directory)
-4. [Multi-System Repo (subdirectories)](#4-multi-system-repo-subdirectories)
+4. [Multi-System Monorepo (subdirectories)](#4-multi-system-monorepo-subdirectories)
 5. [Required Files per System](#5-required-files-per-system)
 6. [Workflow Files to Copy](#6-workflow-files-to-copy)
 7. [Quick Checklist](#7-quick-checklist)
@@ -20,13 +20,15 @@
 
 Go to **Settings → Secrets and variables → Actions** in the GitHub repo and add:
 
-| Secret               | Description                                  | Example                           |
-|----------------------|----------------------------------------------|-----------------------------------|
-| `SONAR_TOKEN`        | SonarCloud authentication token              | *(from sonarcloud.io)*            |
-| `SONAR_PROJECT_KEY`  | SonarCloud project key                       | `Tribe5-Frontend_PadyakPH-Web`    |
-| `SONAR_ORGANIZATION` | SonarCloud organization key                  | `implementsprint`                 |
+| Secret               | Description                                  | Example                                   |
+|----------------------|----------------------------------------------|-------------------------------------------|
+| `SONAR_TOKEN`        | SonarCloud authentication token              | *(from sonarcloud.io)*                    |
+| `SONAR_PROJECT_KEY`  | SonarCloud project key                       | `ImplementSprint_TriniThrive-Frontend`    |
+| `SONAR_ORGANIZATION` | SonarCloud organization key                  | `implementsprint`                         |
 
 > **Tip:** For org-wide secrets (`SONAR_ORGANIZATION`, `SONAR_TOKEN`), set them at the **GitHub Organization level** so all tribe repos inherit them automatically.
+
+> **Monorepos:** One `SONAR_PROJECT_KEY` per repo — the single scan covers all subdirectories.
 
 ---
 
@@ -35,21 +37,21 @@ Go to **Settings → Secrets and variables → Actions** in the GitHub repo and 
 Every repo uses **3 long-lived branches**:
 
 ```
-  test branch        uat branch          prod branch
-  ─────────────      ──────────────      ──────────────
-  CI only            CI + Deploy UAT     CI + Deploy Prod
-  (tests, lint,      (same as test,      (same as uat,
-   security,          PLUS deploy to      PLUS production
-   sonar, build)      UAT environment)    gate approval)
+  feature branch     test branch        uat branch          prod branch
+  ──────────────     ─────────────      ──────────────      ──────────────
+  Development        CI only            CI + Deploy UAT     CI + Deploy Prod
+  (local work,       (tests, lint,      (same as test,      (same as uat,
+   PR → test)        security,          PLUS deploy to      PLUS production
+                     sonar, build)      UAT environment)    gate approval)
 
-  Push flow:   test ──merge──▶ uat ──merge──▶ prod
+  Push flow:   feature ──PR──▶ test ──merge──▶ uat ──merge──▶ prod
 ```
 
 | Branch | What Runs | Deploy? | Approval? |
 |--------|-----------|---------|----------|
 | `test` | Tests + Lint + Security + SonarCloud + Build | No | No |
 | `uat`  | All CI + Deploy to UAT environment | Yes (UAT) | No |
-| `prod` | All CI + Deploy to Prod + Production Gate | Yes (Prod) | Yes |
+| `prod` | All CI + Production Gate + Deploy to Prod | Yes (Prod) | Yes |
 
 ### Setup
 
@@ -72,16 +74,25 @@ In GitHub → **Settings → Environments**:
 In GitHub → **Settings → Branches**:
 - Add branch protection for `uat` and `prod` (require PR, require status checks to pass)
 
+### Developer Workflow
+
+1. Dev creates `feature/my-feature` from `test`
+2. Dev pushes commits, opens PR → `test`
+3. CI runs on the PR — reviewer sees green/red checks
+4. Merge to `test` — CI confirms integration is clean
+5. When features are ready, PR `test` → `uat` — QA tests on UAT environment
+6. After QA approval, PR `uat` → `prod` — requires manual gate approval → deploys to production
+
 ---
 
 ## 3. Single-System Repo (root directory)
 
-**Example:** `Tribe5-Frontend` with one system called `PadyakPH-Web`
+**Example:** `BluesClues-Frontend` with one system called `PadyakPH-Web`
 
 ### Folder Structure
 
 ```
-Tribe5-Frontend/
+BluesClues-Frontend/
 ├── .github/
 │   └── workflows/
 │       ├── master-pipeline.yml        ← orchestrator (YOU CREATE THIS)
@@ -89,7 +100,6 @@ Tribe5-Frontend/
 │       ├── frontend-tests.yml          ← reusable (COPY)
 │       ├── lint-check.yml              ← reusable (COPY)
 │       ├── security-scan.yml           ← reusable (COPY)
-│       ├── sonarcloud-scan.yml         ← reusable (COPY)
 │       ├── deploy-staging.yml          ← reusable (COPY)
 │       └── production-gate.yml         ← reusable (COPY)
 ├── src/
@@ -101,7 +111,7 @@ Tribe5-Frontend/
 ├── package-lock.json                   ← REQUIRED (npm ci needs this)
 ├── vitest.config.ts
 ├── eslint.config.js                    ← ESLint flat config
-├── .prettierrc                         ← (optional) Prettier config
+├── sonar-project.properties            ← SonarCloud config
 └── index.html                          ← Vite entry point
 ```
 
@@ -135,6 +145,31 @@ jobs:
       system-name: PadyakPH-Web          # <-- your project name
     secrets: inherit
 
+  # ── Stage 1.5: SonarCloud ──
+  sonarcloud:
+    name: "SonarCloud Analysis"
+    needs: [frontend]
+    if: always() && needs.frontend.result != 'cancelled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        if: needs.frontend.result == 'success'
+        with:
+          name: PadyakPH-Web-coverage
+          path: coverage
+        continue-on-error: true
+      - uses: SonarSource/sonarqube-scan-action@v5.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+
   # ── Stage 2: Deploy to UAT (uat branch only) ──
   deploy-uat:
     name: "UAT — PadyakPH-Web"
@@ -149,10 +184,21 @@ jobs:
       deploy-environment: uat
     secrets: inherit
 
-  # ── Stage 3: Deploy to Prod (prod branch only) ──
+  # ── Stage 3A: Production Gate (prod branch, BEFORE deploy) ──
+  production-gate:
+    name: "Production Gate"
+    needs: [frontend]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/production-gate.yml
+    with:
+      system-dir: "."
+      app-type: web
+    secrets: inherit
+
+  # ── Stage 3B: Deploy to Prod (AFTER gate approval) ──
   deploy-prod:
     name: "Prod — PadyakPH-Web"
-    needs: [frontend]
+    needs: [production-gate]
     if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
     uses: ./.github/workflows/deploy-staging.yml
     with:
@@ -161,17 +207,6 @@ jobs:
       app-type: web
       artifact-name: PadyakPH-Web-web-build
       deploy-environment: prod
-    secrets: inherit
-
-  # ── Stage 4: Production Gate (prod branch only) ──
-  production-gate:
-    name: "Production Gate"
-    needs: [deploy-prod]
-    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
-    uses: ./.github/workflows/production-gate.yml
-    with:
-      system-dir: "."
-      app-type: web
     secrets: inherit
 
   pipeline-summary:
@@ -188,17 +223,19 @@ jobs:
 
 ---
 
-## 4. Multi-System Repo (subdirectories)
+## 4. Multi-System Monorepo (subdirectories)
 
-**Example:** `Tribe3-Frontend` with 3 systems
+**Example:** `TriniThrive-Frontend` with 3 systems: BayaniHub-Web, DAMAYAN-Web, HopeCard-Web
+
+> When a tribe has **multiple frontends**, they live as directories inside **one repository** (not separate repos).
 
 ### Folder Structure
 
 ```
-Tribe3-Frontend/
+TriniThrive-Frontend/
 ├── .github/
 │   └── workflows/
-│       ├── master-pipeline.yml        ← orchestrator
+│       ├── master-pipeline.yml        ← orchestrator (Template D)
 │       └── ... (all reusable workflow files)
 ├── BayaniHub-Web/
 │   ├── src/
@@ -210,9 +247,20 @@ Tribe3-Frontend/
 │   └── index.html
 ├── DAMAYAN-Web/
 │   ├── ... (same structure)
-└── HopeCard-Web/
-    ├── ... (same structure)
+├── HopeCard-Web/
+│   ├── ... (same structure)
+└── sonar-project.properties           ← at REPO ROOT, covers ALL sub-projects
 ```
+
+### How it differs from single-system
+
+| Feature | Single-System | Multi-System Monorepo |
+|---|---|---|
+| Project location | Root directory (`"."`) | Subdirectories (`BayaniHub-Web/`, etc.) |
+| `system-dir` input | `"."` | Directory name |
+| Change detection | Not needed | `dorny/paths-filter` skips unchanged dirs |
+| SonarCloud | One scan, one `sonar-project.properties` | One scan covers all dirs, `sonar-project.properties` at repo root |
+| Deploys | One per stage | One per sub-project per stage (parallel) |
 
 ### master-pipeline.yml (Multi System)
 
@@ -235,16 +283,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── Stage 0: Detect which sub-projects changed ──
+  detect-changes:
+    name: "Detect Changed Projects"
+    runs-on: ubuntu-latest
+    outputs:
+      bayanihub-web: ${{ steps.filter.outputs.bayanihub-web }}
+      damayan-web: ${{ steps.filter.outputs.damayan-web }}
+      hopecard-web: ${{ steps.filter.outputs.hopecard-web }}
+      shared: ${{ steps.filter.outputs.shared }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            bayanihub-web:
+              - 'BayaniHub-Web/**'
+            damayan-web:
+              - 'DAMAYAN-Web/**'
+            hopecard-web:
+              - 'HopeCard-Web/**'
+            shared:
+              - '.github/**'
+              - 'package.json'
+              - 'sonar-project.properties'
+
+  # ── Stage 1: CI — each sub-project runs in parallel ──
+  # Only runs if its files changed (or shared files like workflows)
   bayanihub-web:
     name: "BayaniHub-Web Pipeline"
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.bayanihub-web == 'true' || needs.detect-changes.outputs.shared == 'true'
     uses: ./.github/workflows/front-end-workflow.yml
     with:
       system-dir: BayaniHub-Web         # <-- subdirectory name
-      system-name: BayaniHub-Web        # <-- same as dir for multi-system
+      system-name: BayaniHub-Web
     secrets: inherit
 
   damayan-web:
     name: "DAMAYAN-Web Pipeline"
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.damayan-web == 'true' || needs.detect-changes.outputs.shared == 'true'
     uses: ./.github/workflows/front-end-workflow.yml
     with:
       system-dir: DAMAYAN-Web
@@ -253,12 +335,198 @@ jobs:
 
   hopecard-web:
     name: "HopeCard-Web Pipeline"
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.hopecard-web == 'true' || needs.detect-changes.outputs.shared == 'true'
     uses: ./.github/workflows/front-end-workflow.yml
     with:
       system-dir: HopeCard-Web
       system-name: HopeCard-Web
     secrets: inherit
+
+  # ── Stage 1.5: SonarCloud (single monorepo scan) ──
+  # Downloads coverage from ALL sub-projects, runs ONE analysis
+  sonarcloud:
+    name: "SonarCloud — Monorepo Analysis"
+    needs: [bayanihub-web, damayan-web, hopecard-web]
+    if: >-
+      always() &&
+      needs.bayanihub-web.result != 'cancelled' &&
+      needs.damayan-web.result != 'cancelled' &&
+      needs.hopecard-web.result != 'cancelled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        if: needs.bayanihub-web.result == 'success'
+        with:
+          name: BayaniHub-Web-coverage
+          path: BayaniHub-Web/coverage
+        continue-on-error: true
+      - uses: actions/download-artifact@v4
+        if: needs.damayan-web.result == 'success'
+        with:
+          name: DAMAYAN-Web-coverage
+          path: DAMAYAN-Web/coverage
+        continue-on-error: true
+      - uses: actions/download-artifact@v4
+        if: needs.hopecard-web.result == 'success'
+        with:
+          name: HopeCard-Web-coverage
+          path: HopeCard-Web/coverage
+        continue-on-error: true
+      - uses: SonarSource/sonarqube-scan-action@v5.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+
+  # ── Stage 2: Deploy to UAT (uat branch only, parallel) ──
+  deploy-uat-bayanihub:
+    name: "UAT — BayaniHub-Web"
+    needs: [bayanihub-web]
+    if: |
+      always() &&
+      github.ref == 'refs/heads/uat' && github.event_name == 'push' &&
+      needs.bayanihub-web.result == 'success'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: BayaniHub-Web
+      system-name: BayaniHub-Web
+      app-type: web
+      artifact-name: BayaniHub-Web-web-build
+      deploy-environment: uat
+    secrets: inherit
+
+  deploy-uat-damayan:
+    name: "UAT — DAMAYAN-Web"
+    needs: [damayan-web]
+    if: |
+      always() &&
+      github.ref == 'refs/heads/uat' && github.event_name == 'push' &&
+      needs.damayan-web.result == 'success'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: DAMAYAN-Web
+      system-name: DAMAYAN-Web
+      app-type: web
+      artifact-name: DAMAYAN-Web-web-build
+      deploy-environment: uat
+    secrets: inherit
+
+  deploy-uat-hopecard:
+    name: "UAT — HopeCard-Web"
+    needs: [hopecard-web]
+    if: |
+      always() &&
+      github.ref == 'refs/heads/uat' && github.event_name == 'push' &&
+      needs.hopecard-web.result == 'success'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: HopeCard-Web
+      system-name: HopeCard-Web
+      app-type: web
+      artifact-name: HopeCard-Web-web-build
+      deploy-environment: uat
+    secrets: inherit
+
+  # ── Stage 3A: Production Gate (prod branch, BEFORE deploy) ──
+  production-gate:
+    name: "Production Readiness Gate"
+    needs: [bayanihub-web, damayan-web, hopecard-web]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/prod' && github.event_name == 'push' &&
+      needs.bayanihub-web.result != 'cancelled' &&
+      needs.damayan-web.result != 'cancelled' &&
+      needs.hopecard-web.result != 'cancelled'
+    uses: ./.github/workflows/production-gate.yml
+    with:
+      system-dir: Tribe3-Frontend
+      app-type: web
+    secrets: inherit
+
+  # ── Stage 3B: Deploy to Prod (AFTER gate approval, parallel) ──
+  deploy-prod-bayanihub:
+    name: "Prod — BayaniHub-Web"
+    needs: [production-gate]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: BayaniHub-Web
+      system-name: BayaniHub-Web
+      app-type: web
+      artifact-name: BayaniHub-Web-web-build
+      deploy-environment: prod
+    secrets: inherit
+
+  deploy-prod-damayan:
+    name: "Prod — DAMAYAN-Web"
+    needs: [production-gate]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: DAMAYAN-Web
+      system-name: DAMAYAN-Web
+      app-type: web
+      artifact-name: DAMAYAN-Web-web-build
+      deploy-environment: prod
+    secrets: inherit
+
+  deploy-prod-hopecard:
+    name: "Prod — HopeCard-Web"
+    needs: [production-gate]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: HopeCard-Web
+      system-name: HopeCard-Web
+      app-type: web
+      artifact-name: HopeCard-Web-web-build
+      deploy-environment: prod
+    secrets: inherit
+
+  pipeline-summary:
+    name: "Pipeline Summary"
+    needs: [bayanihub-web, damayan-web, hopecard-web]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Results
+        run: |
+          echo "BayaniHub-Web: ${{ needs.bayanihub-web.result }}"
+          echo "DAMAYAN-Web:   ${{ needs.damayan-web.result }}"
+          echo "HopeCard-Web:  ${{ needs.hopecard-web.result }}"
+          FAILED=false
+          if [[ "${{ needs.bayanihub-web.result }}" == "failure" ]]; then FAILED=true; fi
+          if [[ "${{ needs.damayan-web.result }}" == "failure" ]]; then FAILED=true; fi
+          if [[ "${{ needs.hopecard-web.result }}" == "failure" ]]; then FAILED=true; fi
+          if [ "$FAILED" = "true" ]; then echo "❌ Failed!"; exit 1; fi
+          echo "✅ All passed!"
 ```
+
+### sonar-project.properties (at repo root)
+
+```properties
+# Sources — all sub-project src directories
+sonar.sources=BayaniHub-Web/src,DAMAYAN-Web/src,HopeCard-Web/src
+
+# Tests
+sonar.tests=BayaniHub-Web/tests,DAMAYAN-Web/tests,HopeCard-Web/tests
+
+# Coverage — merge coverage from all sub-projects
+sonar.javascript.lcov.reportPaths=BayaniHub-Web/coverage/lcov.info,DAMAYAN-Web/coverage/lcov.info,HopeCard-Web/coverage/lcov.info
+
+# Exclusions
+sonar.coverage.exclusions=**/tests/**,**/*.test.*,**/node_modules/**
+sonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/**
+```
+
+> `sonar.organization` and `sonar.projectKey` are omitted — they come from GitHub Secrets via CLI args.
 
 ---
 
@@ -266,7 +534,7 @@ jobs:
 
 Each system (whether at root or in a subdirectory) needs these files:
 
-### 4a. package.json
+### 5a. package.json
 
 Must have these **scripts** and **devDependencies** at minimum:
 
@@ -322,7 +590,7 @@ Must have these **scripts** and **devDependencies** at minimum:
 | `eslint`                 | `lint-check.yml` → runs `npx eslint . --max-warnings=0` |
 | `vite`                   | `front-end-workflow.yml` → build step runs `npm run build` |
 
-### 4b. package-lock.json (CRITICAL)
+### 5b. package-lock.json (CRITICAL)
 
 The pipeline uses `npm ci` (not `npm install`). This requires `package-lock.json`.
 
@@ -333,7 +601,7 @@ npm install
 
 > **`npm ci`** does a clean install from the lockfile — it's faster, deterministic, and what CI should always use. Without `package-lock.json`, `npm ci` will fail immediately.
 
-### 4c. vitest.config.ts
+### 5c. vitest.config.ts
 
 ```typescript
 import { defineConfig } from 'vitest/config';
@@ -353,10 +621,10 @@ export default defineConfig({
 **Why these reporters:**
 - `text` — console output
 - `json-summary` — parsed by `frontend-tests.yml` to check coverage threshold
-- `lcov` — consumed by `sonarcloud-scan.yml` for SonarCloud analysis
+- `lcov` — consumed by SonarCloud for code coverage analysis
 - `json` + `html` — optional, for detailed reports
 
-### 4d. eslint.config.js (ESLint v9 flat config)
+### 5d. eslint.config.js (ESLint v9 flat config)
 
 ```javascript
 import js from '@eslint/js';
@@ -414,7 +682,7 @@ export default [
 npm run lint
 ```
 
-### 4e. index.html (Vite entry point)
+### 5e. index.html (Vite entry point)
 
 ```html
 <!DOCTYPE html>
@@ -431,7 +699,7 @@ npm run lint
 </html>
 ```
 
-### 4f. src/main.jsx (minimal)
+### 5f. src/main.jsx (minimal)
 
 ```jsx
 import React from 'react';
@@ -445,7 +713,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 );
 ```
 
-### 4g. src/App.jsx (minimal)
+### 5g. src/App.jsx (minimal)
 
 ```jsx
 function App() {
@@ -455,7 +723,7 @@ function App() {
 export default App;
 ```
 
-### 4h. tests/ui.test.js (starter test)
+### 5h. tests/ui.test.js (starter test)
 
 ```javascript
 import { describe, it, expect } from 'vitest';
@@ -475,16 +743,17 @@ Copy **all** these reusable workflow files into `.github/workflows/` of every ne
 
 | File                      | Purpose                                    |
 |---------------------------|--------------------------------------------|
-| `front-end-workflow.yml`  | Frontend orchestrator (tests→lint→sonar→build) |
+| `front-end-workflow.yml`  | Frontend orchestrator (tests→lint→security→build) |
 | `frontend-tests.yml`     | Vitest unit tests + coverage               |
 | `lint-check.yml`         | ESLint + Prettier checks                   |
 | `security-scan.yml`      | npm audit + Gitleaks + license check       |
-| `sonarcloud-scan.yml`    | SonarCloud quality gate                    |
 | `deploy-staging.yml`     | Deploy to staging environment              |
 | `production-gate.yml`    | Manual production approval gate            |
 | `governance-check.yml`   | Coverage threshold governance              |
 
-Then create your own `master-pipeline.yml` based on the templates in sections 2 or 3 above.
+> **Note:** SonarCloud runs **inline in master-pipeline.yml** (not as a separate reusable workflow). This avoids CE task collisions in monorepos and keeps the scan architecture simpler.
+
+Then create your own `master-pipeline.yml` based on the templates in sections 3 or 4 above.
 
 For **backend** repos, also copy: `backend-workflow.yml`, `backend-tests.yml`, `docker-build.yml`
 For **mobile** repos, also copy: `mobile-workflow.yml`, `mobile-tests.yml`
@@ -496,9 +765,12 @@ For **mobile** repos, also copy: `mobile-workflow.yml`, `mobile-tests.yml`
 ### Per Repository
 
 - [ ] Copy all reusable workflow files to `.github/workflows/`
-- [ ] Create `master-pipeline.yml` (single or multi-system)
+- [ ] Create `master-pipeline.yml` (single-system or multi-system monorepo)
 - [ ] Add GitHub secrets: `SONAR_TOKEN`, `SONAR_PROJECT_KEY`, `SONAR_ORGANIZATION`
 - [ ] Create SonarCloud project (sonarcloud.io) and note the project key
+- [ ] Create `sonar-project.properties` (at root for monorepo, listing all sub-project paths)
+- [ ] Create branches: `test`, `uat`, `prod`
+- [ ] Set up GitHub Environments: `uat` and `production` (with required reviewers)
 
 ### Per System (root or subdirectory)
 
@@ -511,16 +783,25 @@ For **mobile** repos, also copy: `mobile-workflow.yml`, `mobile-tests.yml`
 - [ ] `tests/` directory with at least one `.test.js` file
 - [ ] Run `npm test` locally to verify tests pass before pushing
 
-### Pipeline What-Runs-What
+### Pipeline Flow
 
 ```
 master-pipeline.yml
-  └─ front-end-workflow.yml          (orchestrator)
-       ├─ frontend-tests.yml         → npm ci → vitest run --coverage
-       ├─ lint-check.yml             → npm ci → eslint . --max-warnings=0
-       ├─ security-scan.yml          → npm audit + gitleaks
-       ├─ sonarcloud-scan.yml        → sonar scanner (uses coverage from tests)
-       └─ Build step                 → npm ci → npm run build
+  │
+  ├─ [monorepo only] detect-changes     → skip unchanged sub-projects
+  │
+  └─ front-end-workflow.yml              (orchestrator per sub-project)
+       ├─ frontend-tests.yml             → npm ci → vitest run --coverage
+       ├─ lint-check.yml                 → npm ci → eslint . --max-warnings=0
+       ├─ security-scan.yml              → npm audit + gitleaks
+       └─ Build step                     → npm ci → npm run build
+  │
+  ├─ SonarCloud                          → single scan, coverage from all sub-projects
+  │
+  ├─ [uat branch] Deploy to UAT
+  │
+  ├─ [prod branch] Production Gate       → manual approval (BEFORE deploy)
+  └─ [prod branch] Deploy to Prod        → (AFTER gate approval)
 ```
 
 ### Common Failures & Fixes
@@ -530,7 +811,11 @@ master-pipeline.yml
 | `npm ci` fails with "no package-lock.json" | Missing lockfile | Run `npm install` locally, commit `package-lock.json` |
 | `vitest: command not found` | Missing devDependency | Add `vitest` and `@vitest/coverage-v8` to `devDependencies` |
 | `Cannot find module 'jsdom'` | Missing devDependency | Add `jsdom` to `devDependencies` |
-| SonarCloud "indexed twice" error | `sonar.sources` and `sonar.tests` overlap | Sources = `src`, Tests = `tests` (they must be separate directories) |
+| SonarCloud "CE Task failed" | Multiple parallel scans on same key | Use single monorepo scan, not per-sub-project |
+| SonarCloud "indexed twice" | `sonar.sources` and `sonar.tests` overlap | Sources = `src`, Tests = `tests` (separate dirs) |
+| SonarCloud "Project not found" | Wrong key or org | Verify `SONAR_PROJECT_KEY` and `SONAR_ORGANIZATION` secrets |
+| SonarCloud job skipped | `if` condition too strict | Use `!= 'cancelled'` instead of `== 'success'` |
 | ESLint "config not found" | No ESLint config | Create `eslint.config.js` (flat config for ESLint v9) |
 | Build fails "no index.html" | Missing Vite entry | Add `index.html` at system root |
 | Coverage below threshold | Insufficient tests | Add more tests or lower `coverage-threshold` input |
+| Production deploys without approval | Gate runs after deploy | Gate must `needs: [CI]`, deploy must `needs: [production-gate]` |
