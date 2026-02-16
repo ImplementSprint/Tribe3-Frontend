@@ -1,6 +1,17 @@
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  REUSABLE: Vercel Deployment                                   ║
-# ║  Handles preview (PR) and production (main) deploys           ║
+# ║  Handles UAT (preview) and Production deploys                 ║
+# ║  Monorepo: each sub-project has its own VERCEL_PROJECT_ID     ║
+# ║                                                                ║
+# ║  Required repo secrets (per environment × sub-project):       ║
+# ║    VERCEL_TOKEN              — shared Vercel API token         ║
+# ║    VERCEL_ORG_ID             — shared Vercel Org/Team ID      ║
+# ║    UAT_VERCEL_PROJECT_ID_BAYANIHUB_WEB                        ║
+# ║    UAT_VERCEL_PROJECT_ID_DAMAYAN_WEB                          ║
+# ║    UAT_VERCEL_PROJECT_ID_HOPECARD_WEB                         ║
+# ║    PROD_VERCEL_PROJECT_ID_BAYANIHUB_WEB                       ║
+# ║    PROD_VERCEL_PROJECT_ID_DAMAYAN_WEB                         ║
+# ║    PROD_VERCEL_PROJECT_ID_HOPECARD_WEB                        ║
 # ╚══════════════════════════════════════════════════════════════════╝
 name: "Reusable: Vercel Deploy"
 
@@ -10,12 +21,12 @@ on:
       working-directory:
         required: true
         type: string
-        description: "Project directory"
+        description: "Project directory (e.g. BayaniHub-Web)"
       environment:
         required: false
         type: string
         default: "preview"
-        description: "Deployment environment (preview|staging|production)"
+        description: "Deployment environment (preview|production)"
       artifact-name:
         required: false
         type: string
