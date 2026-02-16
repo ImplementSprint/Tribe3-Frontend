@@ -1,6 +1,7 @@
 # Repository Setup Guide — CI/CD Pipeline
 
 > **How to set up any new tribe repository so the CI/CD pipeline runs successfully.**
+> All frontend projects use **React + Vite**. Backend projects use **Express/Node.js**. Mobile projects use **React Native**.
 
 ---
 
@@ -8,10 +9,13 @@
 
 1. [GitHub Secrets (Required)](#1-github-secrets-required)
 2. [Branching Strategy](#2-branching-strategy)
-3. [Single-System Repo (root directory)](#3-single-system-repo-root-directory)
-4. [Multi-System Monorepo (subdirectories)](#4-multi-system-monorepo-subdirectories)
-5. [Required Files per System](#5-required-files-per-system)
-6. [Workflow Files to Copy](#6-workflow-files-to-copy)
+3. [Single-System Frontend Repo](#3-single-system-frontend-repo)
+4. [Multi-System Frontend Monorepo](#4-multi-system-frontend-monorepo)
+5. [Single-System Backend Repo](#5-single-system-backend-repo)
+6. [Single-System Mobile Repo](#6-single-system-mobile-repo)
+7. [Required Files per System](#7-required-files-per-system)
+8. [Workflow Files to Copy](#8-workflow-files-to-copy)
+9. [Quick Checklist](#9-quick-checklist)
 7. [Quick Checklist](#7-quick-checklist)
 
 ---
@@ -85,7 +89,9 @@ In GitHub → **Settings → Branches**:
 
 ---
 
-## 3. Single-System Repo (root directory)
+## 3. Single-System Frontend Repo
+
+> All frontend projects use **React + Vite**. Each project needs an `index.html` entry point at the project root.
 
 **Example:** `BluesClues-Frontend` with one system called `PadyakPH-Web`
 
@@ -223,11 +229,11 @@ jobs:
 
 ---
 
-## 4. Multi-System Monorepo (subdirectories)
+## 4. Multi-System Frontend Monorepo
 
 **Example:** `TriniThrive-Frontend` with 3 systems: BayaniHub-Web, DAMAYAN-Web, HopeCard-Web
 
-> When a tribe has **multiple frontends**, they live as directories inside **one repository** (not separate repos).
+> When a tribe has **multiple React frontends**, they live as directories inside **one repository** (not separate repos). Each sub-project is a standalone React + Vite app with its own `index.html`, `package.json`, etc.
 
 ### Folder Structure
 
@@ -530,9 +536,494 @@ sonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/**
 
 ---
 
-## 5. Required Files per System
+## 5. Single-System Backend Repo
 
-Each system (whether at root or in a subdirectory) needs these files:
+> Backend projects use **Express/Node.js** with **Jest** for testing. They follow the same branching strategy and pipeline structure as frontend repos, but use `backend-workflow.yml` instead of `front-end-workflow.yml`.
+
+**Example:** `ThriniThrive-Backend`, `BluesClues-Backend`, `APICenter`
+
+### Folder Structure
+
+```
+Tribe-Backend/
+├── .github/
+│   └── workflows/
+│       ├── master-pipeline.yml         ← orchestrator (Template B)
+│       ├── backend-workflow.yml         ← reusable (COPY)
+│       ├── backend-tests.yml            ← reusable (COPY)
+│       ├── lint-check.yml               ← reusable (COPY)
+│       ├── security-scan.yml            ← reusable (COPY)
+│       ├── docker-build.yml             ← reusable (COPY)
+│       ├── deploy-staging.yml           ← reusable (COPY)
+│       └── production-gate.yml          ← reusable (COPY)
+├── src/
+│   └── index.js                         ← Express entry point
+├── tests/
+│   └── api.test.js
+├── package.json
+├── package-lock.json                    ← REQUIRED (npm ci needs this)
+├── jest.config.js                       ← Jest config with coverage
+├── eslint.config.js                     ← ESLint v9 flat config (no React plugins)
+├── sonar-project.properties
+└── Dockerfile                           ← for Docker build step (optional)
+```
+
+### Key Differences from Frontend
+
+| Feature | Frontend (React + Vite) | Backend (Express/Node) |
+|---|---|---|
+| Orchestrator workflow | `front-end-workflow.yml` | `backend-workflow.yml` |
+| Test runner | Vitest | Jest |
+| Test config | `vitest.config.ts` | `jest.config.js` |
+| Build output | `dist/` (via `vite build`) | Docker image (via `docker-build.yml`) |
+| Entry point | `index.html` + `src/main.jsx` | `src/index.js` |
+| ESLint plugins | `eslint-plugin-react`, `eslint-plugin-react-hooks` | None (Node.js globals only) |
+| `app-type` in deploy | `web` | `api` |
+
+### master-pipeline.yml (Template B — Backend)
+
+```yaml
+name: "Master Pipeline Orchestrator"
+
+on:
+  push:
+    branches: [test, uat, prod]
+  pull_request:
+    branches: [test, uat, prod]
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
+
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: "REPLACE_WITH_SYSTEM_NAME Pipeline"
+    uses: ./.github/workflows/backend-workflow.yml
+    with:
+      system-dir: "."
+      system-name: REPLACE_WITH_SYSTEM_NAME
+      enable-docker-build: true
+      docker-image-name: REPLACE_WITH_IMAGE_NAME
+    secrets: inherit
+
+  sonarcloud:
+    name: "SonarCloud Analysis"
+    needs: [backend]
+    if: always() && needs.backend.result != 'cancelled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        if: needs.backend.result == 'success'
+        with:
+          name: REPLACE_WITH_SYSTEM_NAME-coverage
+          path: coverage
+        continue-on-error: true
+      - uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+
+  deploy-uat:
+    name: "UAT — REPLACE_WITH_SYSTEM_NAME"
+    needs: [backend]
+    if: github.ref == 'refs/heads/uat' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: "."
+      system-name: REPLACE_WITH_SYSTEM_NAME
+      app-type: api
+      artifact-name: REPLACE_WITH_SYSTEM_NAME-docker-image
+      deploy-environment: uat
+    secrets: inherit
+
+  production-gate:
+    name: "Production Gate"
+    needs: [backend]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/production-gate.yml
+    with:
+      system-dir: "."
+      app-type: api
+    secrets: inherit
+
+  deploy-prod:
+    name: "Prod — REPLACE_WITH_SYSTEM_NAME"
+    needs: [production-gate]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: "."
+      system-name: REPLACE_WITH_SYSTEM_NAME
+      app-type: api
+      artifact-name: REPLACE_WITH_SYSTEM_NAME-docker-image
+      deploy-environment: prod
+    secrets: inherit
+
+  pipeline-summary:
+    name: "Pipeline Summary"
+    needs: [backend]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Results
+        run: |
+          echo "REPLACE_WITH_SYSTEM_NAME: ${{ needs.backend.result }}"
+          if [[ "${{ needs.backend.result }}" == "failure" ]]; then exit 1; fi
+```
+
+### package.json (Backend)
+
+```json
+{
+  "name": "your-backend-name",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "jest --coverage --verbose --ci --forceExit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "express": "^4.18.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^6.3.0",
+    "nodemon": "^3.1.0",
+    "eslint": "^9.0.0",
+    "@eslint/js": "^9.0.0",
+    "globals": "^15.0.0"
+  }
+}
+```
+
+### jest.config.js
+
+```javascript
+module.exports = {
+  testEnvironment: 'node',
+  collectCoverage: true,
+  coverageReporters: ['text', 'json', 'json-summary', 'lcov'],
+  coverageDirectory: 'coverage',
+  testMatch: ['**/tests/**/*.test.{js,ts}'],
+};
+```
+
+### eslint.config.js (Backend — no React)
+
+```javascript
+import js from '@eslint/js';
+import globals from 'globals';
+
+export default [
+  { ignores: ['dist/', 'coverage/', 'node_modules/'] },
+  js.configs.recommended,
+  {
+    files: ['**/*.js'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: { ...globals.node, ...globals.es2021 },
+    },
+    rules: {
+      'no-unused-vars': 'warn',
+      'no-console': 'off',
+    },
+  },
+  {
+    files: ['tests/**/*.js'],
+    languageOptions: {
+      globals: { ...globals.jest },
+    },
+  },
+];
+```
+
+### Dockerfile (optional)
+
+```dockerfile
+FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY . .
+EXPOSE 3000
+CMD ["node", "src/index.js"]
+```
+
+### Setup Commands
+
+```bash
+npm install
+npm test          # verify jest passes
+npm run lint      # verify eslint passes
+```
+
+---
+
+## 6. Single-System Mobile Repo
+
+> Mobile projects use **React Native** with **Jest** for testing. They follow the same branching strategy but use `mobile-workflow.yml` and can optionally build an Android APK.
+
+**Example:** `GCkaSoho-Mobile`, `ServEase-Mobile`, `CapusOne-Mobile`
+
+### Folder Structure
+
+```
+Tribe-Mobile/
+├── .github/
+│   └── workflows/
+│       ├── master-pipeline.yml         ← orchestrator (Template C)
+│       ├── mobile-workflow.yml          ← reusable (COPY)
+│       ├── mobile-tests.yml             ← reusable (COPY)
+│       ├── lint-check.yml               ← reusable (COPY)
+│       ├── security-scan.yml            ← reusable (COPY)
+│       ├── deploy-staging.yml           ← reusable (COPY)
+│       └── production-gate.yml          ← reusable (COPY)
+├── src/
+│   └── App.jsx
+├── tests/
+│   └── App.test.js
+├── android/                             ← React Native android directory
+│   ├── gradlew
+│   └── app/
+├── ios/                                 ← React Native iOS directory
+├── package.json
+├── package-lock.json                    ← REQUIRED
+├── jest.config.js
+├── eslint.config.js
+├── sonar-project.properties
+└── index.js                             ← React Native entry point
+```
+
+### Key Differences from Frontend
+
+| Feature | Frontend (React + Vite) | Mobile (React Native) |
+|---|---|---|
+| Orchestrator workflow | `front-end-workflow.yml` | `mobile-workflow.yml` |
+| Test runner | Vitest | Jest |
+| Test config | `vitest.config.ts` | `jest.config.js` (with `react-native` preset) |
+| Build output | `dist/` (Vite) | APK (Gradle) |
+| Entry point | `index.html` | `index.js` |
+| `app-type` in deploy | `web` | `mobile` |
+| Extra dirs | — | `android/`, `ios/` |
+
+### master-pipeline.yml (Template C — Mobile)
+
+```yaml
+name: "Master Pipeline Orchestrator"
+
+on:
+  push:
+    branches: [test, uat, prod]
+  pull_request:
+    branches: [test, uat, prod]
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
+
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mobile:
+    name: "REPLACE_WITH_SYSTEM_NAME Pipeline"
+    uses: ./.github/workflows/mobile-workflow.yml
+    with:
+      system-dir: "."
+      system-name: REPLACE_WITH_SYSTEM_NAME
+      build-android: true
+      build-variant: assembleRelease
+    secrets: inherit
+
+  sonarcloud:
+    name: "SonarCloud Analysis"
+    needs: [mobile]
+    if: always() && needs.mobile.result != 'cancelled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        if: needs.mobile.result == 'success'
+        with:
+          name: REPLACE_WITH_SYSTEM_NAME-coverage
+          path: coverage
+        continue-on-error: true
+      - uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+
+  deploy-uat:
+    name: "UAT — REPLACE_WITH_SYSTEM_NAME"
+    needs: [mobile]
+    if: github.ref == 'refs/heads/uat' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: "."
+      system-name: REPLACE_WITH_SYSTEM_NAME
+      app-type: mobile
+      artifact-name: REPLACE_WITH_SYSTEM_NAME-android-apk
+      deploy-environment: uat
+    secrets: inherit
+
+  production-gate:
+    name: "Production Gate"
+    needs: [mobile]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/production-gate.yml
+    with:
+      system-dir: "."
+      app-type: mobile
+    secrets: inherit
+
+  deploy-prod:
+    name: "Prod — REPLACE_WITH_SYSTEM_NAME"
+    needs: [production-gate]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      system-dir: "."
+      system-name: REPLACE_WITH_SYSTEM_NAME
+      app-type: mobile
+      artifact-name: REPLACE_WITH_SYSTEM_NAME-android-apk
+      deploy-environment: prod
+    secrets: inherit
+
+  pipeline-summary:
+    name: "Pipeline Summary"
+    needs: [mobile]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Results
+        run: |
+          echo "REPLACE_WITH_SYSTEM_NAME: ${{ needs.mobile.result }}"
+          if [[ "${{ needs.mobile.result }}" == "failure" ]]; then exit 1; fi
+```
+
+### package.json (Mobile)
+
+```json
+{
+  "name": "your-mobile-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "react-native start",
+    "test": "jest --coverage --verbose --ci --forceExit",
+    "lint": "eslint .",
+    "android": "react-native run-android",
+    "ios": "react-native run-ios"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-native": "^0.74.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "@testing-library/react-native": "^12.0.0",
+    "react-test-renderer": "^18.2.0",
+    "eslint": "^9.0.0",
+    "@eslint/js": "^9.0.0",
+    "globals": "^15.0.0",
+    "eslint-plugin-react": "^7.37.0",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "eslint-plugin-react-native": "^4.1.0"
+  }
+}
+```
+
+### jest.config.js (Mobile)
+
+```javascript
+module.exports = {
+  preset: 'react-native',
+  collectCoverage: true,
+  coverageReporters: ['text', 'json', 'json-summary', 'lcov'],
+  coverageDirectory: 'coverage',
+  testMatch: ['**/tests/**/*.test.{js,jsx,ts,tsx}'],
+  transformIgnorePatterns: [
+    'node_modules/(?!(react-native|@react-native|@react-navigation)/)',
+  ],
+};
+```
+
+### eslint.config.js (Mobile — React + Node globals)
+
+```javascript
+import js from '@eslint/js';
+import globals from 'globals';
+import reactPlugin from 'eslint-plugin-react';
+import reactHooksPlugin from 'eslint-plugin-react-hooks';
+
+export default [
+  { ignores: ['dist/', 'coverage/', 'node_modules/', 'android/', 'ios/'] },
+  js.configs.recommended,
+  {
+    files: ['**/*.{js,jsx}'],
+    plugins: {
+      react: reactPlugin,
+      'react-hooks': reactHooksPlugin,
+    },
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: { ...globals.browser, ...globals.es2021, ...globals.node },
+      parserOptions: { ecmaFeatures: { jsx: true } },
+    },
+    settings: { react: { version: 'detect' } },
+    rules: {
+      'react/react-in-jsx-scope': 'off',
+      'react/prop-types': 'warn',
+      'no-unused-vars': 'warn',
+      'no-console': 'warn',
+    },
+  },
+  {
+    files: ['tests/**/*.{js,jsx}'],
+    languageOptions: {
+      globals: { ...globals.jest },
+    },
+  },
+];
+```
+
+### Setup Commands
+
+```bash
+npm install
+npm test          # verify jest passes
+npm run lint      # verify eslint passes
+```
+
+---
+
+## 7. Required Files per System
+
+Each frontend system (whether at root or in a subdirectory) needs these files:
 
 ### 5a. package.json
 
@@ -737,7 +1228,7 @@ describe('App', () => {
 
 ---
 
-## 6. Workflow Files to Copy
+## 8. Workflow Files to Copy
 
 Copy **all** these reusable workflow files into `.github/workflows/` of every new repo:
 
@@ -753,55 +1244,98 @@ Copy **all** these reusable workflow files into `.github/workflows/` of every ne
 
 > **Note:** SonarCloud runs **inline in master-pipeline.yml** (not as a separate reusable workflow). This avoids CE task collisions in monorepos and keeps the scan architecture simpler.
 
-Then create your own `master-pipeline.yml` based on the templates in sections 3 or 4 above.
+Then create your own `master-pipeline.yml` based on the templates in sections 3, 4, 5, or 6 above.
 
 For **backend** repos, also copy: `backend-workflow.yml`, `backend-tests.yml`, `docker-build.yml`
 For **mobile** repos, also copy: `mobile-workflow.yml`, `mobile-tests.yml`
 
 ---
 
-## 7. Quick Checklist
+## 9. Quick Checklist
+
+### Which Template to Use
+
+| Repo Type | Template | Orchestrator Workflow | Test Runner |
+|---|---|---|---|
+| Single-system frontend (React + Vite) | **Section 3 (Template A)** | `front-end-workflow.yml` | Vitest |
+| Multi-system frontend monorepo | **Section 4 (Template D)** | `front-end-workflow.yml` | Vitest |
+| Single-system backend (Express/Node) | **Section 5 (Template B)** | `backend-workflow.yml` | Jest |
+| Single-system mobile (React Native) | **Section 6 (Template C)** | `mobile-workflow.yml` | Jest |
 
 ### Per Repository
 
 - [ ] Copy all reusable workflow files to `.github/workflows/`
-- [ ] Create `master-pipeline.yml` (single-system or multi-system monorepo)
+- [ ] Create `master-pipeline.yml` using the correct template (see table above)
 - [ ] Add GitHub secrets: `SONAR_TOKEN`, `SONAR_PROJECT_KEY`, `SONAR_ORGANIZATION`
 - [ ] Create SonarCloud project (sonarcloud.io) and note the project key
 - [ ] Create `sonar-project.properties` (at root for monorepo, listing all sub-project paths)
 - [ ] Create branches: `test`, `uat`, `prod`
 - [ ] Set up GitHub Environments: `uat` and `production` (with required reviewers)
 
-### Per System (root or subdirectory)
+### Per Frontend System (React + Vite)
 
-- [ ] `package.json` with correct `scripts` (`test`, `build`, `lint`) and `devDependencies`
-- [ ] `package-lock.json` exists (run `npm install` once to generate)
-- [ ] `vitest.config.ts` with `jsdom` environment and `v8` coverage with required reporters
-- [ ] `eslint.config.js` (ESLint v9 flat config)
-- [ ] `index.html` at system root (Vite entry point)
+- [ ] `package.json` with scripts: `dev`, `build`, `test`, `lint`
+- [ ] `package-lock.json` exists (run `npm install` to generate)
+- [ ] `index.html` at system root (**required** — Vite entry point with `<div id="root">`)
 - [ ] `src/main.jsx` and `src/App.jsx` exist
+- [ ] `vitest.config.ts` with `jsdom` environment and `v8` coverage
+- [ ] `eslint.config.js` (ESLint v9 flat config with React plugins)
 - [ ] `tests/` directory with at least one `.test.js` file
-- [ ] Run `npm test` locally to verify tests pass before pushing
+- [ ] Verify: `npm test`, `npm run lint`, `npm run build`
 
-### Pipeline Flow
+### Per Backend System (Express/Node)
+
+- [ ] `package.json` with scripts: `start`, `dev`, `test`, `lint`
+- [ ] `package-lock.json` exists
+- [ ] `src/index.js` (Express entry point)
+- [ ] `jest.config.js` with `node` environment and coverage reporters
+- [ ] `eslint.config.js` (ESLint v9 flat config, Node globals, no React)
+- [ ] `tests/` directory with at least one `.test.js` file
+- [ ] `Dockerfile` (optional, for Docker build)
+- [ ] Verify: `npm test`, `npm run lint`
+
+### Per Mobile System (React Native)
+
+- [ ] `package.json` with scripts: `start`, `test`, `lint`
+- [ ] `package-lock.json` exists
+- [ ] `index.js` (React Native entry point)
+- [ ] `jest.config.js` with `react-native` preset and coverage reporters
+- [ ] `eslint.config.js` (ESLint v9 flat config with React + Node globals)
+- [ ] `android/` directory with `gradlew` (for APK builds)
+- [ ] `tests/` directory with at least one `.test.js` file
+- [ ] Verify: `npm test`, `npm run lint`
+
+### Pipeline Flow (all repo types)
 
 ```
 master-pipeline.yml
   │
-  ├─ [monorepo only] detect-changes     → skip unchanged sub-projects
+  ├─ [monorepo only] detect-changes       → skip unchanged sub-projects
   │
-  └─ front-end-workflow.yml              (orchestrator per sub-project)
-       ├─ frontend-tests.yml             → npm ci → vitest run --coverage
-       ├─ lint-check.yml                 → npm ci → eslint . --max-warnings=0
-       ├─ security-scan.yml              → npm audit + gitleaks
-       └─ Build step                     → npm ci → npm run build
+  ├─ FRONTEND: front-end-workflow.yml      (React + Vite)
+  │    ├─ frontend-tests.yml               → npm ci → vitest run --coverage
+  │    ├─ lint-check.yml                   → npm ci → eslint . --max-warnings=0
+  │    ├─ security-scan.yml                → npm audit + gitleaks
+  │    └─ Build                            → npm ci → vite build → dist/
   │
-  ├─ SonarCloud                          → single scan, coverage from all sub-projects
+  ├─ BACKEND: backend-workflow.yml         (Express/Node)
+  │    ├─ backend-tests.yml                → npm ci → jest --coverage
+  │    ├─ lint-check.yml                   → npm ci → eslint . --max-warnings=0
+  │    ├─ security-scan.yml                → npm audit + gitleaks
+  │    └─ docker-build.yml                 → Docker build → GHCR push
+  │
+  ├─ MOBILE: mobile-workflow.yml           (React Native)
+  │    ├─ mobile-tests.yml                 → npm ci → jest --coverage
+  │    ├─ lint-check.yml                   → npm ci → eslint . --max-warnings=0
+  │    ├─ security-scan.yml                → npm audit + gitleaks
+  │    └─ Android APK (optional)           → gradlew assembleRelease
+  │
+  ├─ SonarCloud                            → single scan, coverage from all sub-projects
   │
   ├─ [uat branch] Deploy to UAT
   │
-  ├─ [prod branch] Production Gate       → manual approval (BEFORE deploy)
-  └─ [prod branch] Deploy to Prod        → (AFTER gate approval)
+  ├─ [prod branch] Production Gate         → manual approval (BEFORE deploy)
+  └─ [prod branch] Deploy to Prod          → (AFTER gate approval)
 ```
 
 ### Common Failures & Fixes
@@ -810,12 +1344,15 @@ master-pipeline.yml
 |-------|-------|-----|
 | `npm ci` fails with "no package-lock.json" | Missing lockfile | Run `npm install` locally, commit `package-lock.json` |
 | `vitest: command not found` | Missing devDependency | Add `vitest` and `@vitest/coverage-v8` to `devDependencies` |
-| `Cannot find module 'jsdom'` | Missing devDependency | Add `jsdom` to `devDependencies` |
+| `jest: command not found` | Missing devDependency | Add `jest` to `devDependencies` |
+| `Cannot find module 'jsdom'` | Missing devDependency | Add `jsdom` to `devDependencies` (frontend only) |
+| Build fails "no index.html" | Missing Vite entry | Add `index.html` at system root (frontend only) |
 | SonarCloud "CE Task failed" | Multiple parallel scans on same key | Use single monorepo scan, not per-sub-project |
 | SonarCloud "indexed twice" | `sonar.sources` and `sonar.tests` overlap | Sources = `src`, Tests = `tests` (separate dirs) |
 | SonarCloud "Project not found" | Wrong key or org | Verify `SONAR_PROJECT_KEY` and `SONAR_ORGANIZATION` secrets |
 | SonarCloud job skipped | `if` condition too strict | Use `!= 'cancelled'` instead of `== 'success'` |
 | ESLint "config not found" | No ESLint config | Create `eslint.config.js` (flat config for ESLint v9) |
-| Build fails "no index.html" | Missing Vite entry | Add `index.html` at system root |
+| Docker build fails | Missing `Dockerfile` | Create Dockerfile in repo root (backend only) |
+| Android build fails | Missing `android/gradlew` | Ensure React Native android dir exists (mobile only) |
 | Coverage below threshold | Insufficient tests | Add more tests or lower `coverage-threshold` input |
 | Production deploys without approval | Gate runs after deploy | Gate must `needs: [CI]`, deploy must `needs: [production-gate]` |

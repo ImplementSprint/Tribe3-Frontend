@@ -221,6 +221,8 @@ Use `mobile-workflow.yml` in your `master-pipeline.yml`.
 
 ## 6. Frontend Repo Setup
 
+> All frontend projects use **React + Vite**. Every React project **must** have an `index.html` at its root — this is the Vite entry point that loads `src/main.jsx`.
+
 Each frontend system (at root or subdirectory) needs these files:
 
 ### Required File Structure
