@@ -281,69 +281,6 @@ jobs:
     secrets: inherit
 
   # ╔══════════════════════════════════════════════════════════════╗
-  # ║  AUTO-PROMOTE — Cascade through branches automatically      ║
-  # ║  test → uat (after CI passes)                                ║
-  # ║  uat → main (after CI + UAT deploy passes)                   ║
-  # ║  Only the production gate on main requires manual approval.  ║
-  # ╚══════════════════════════════════════════════════════════════╝
-
-  # ── Auto-promote: test → uat ───────────────────────────────────
-  auto-promote-to-uat:
-    name: "Auto-Promote → UAT"
-    needs: [bayanihub-web, damayan-web, hopecard-web]
-    if: >-
-      always() &&
-      github.ref == 'refs/heads/test' && github.event_name == 'push' &&
-      !contains(needs.*.result, 'failure') &&
-      !contains(needs.*.result, 'cancelled')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Merge test → uat
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin uat
-          git checkout uat
-          git merge origin/test --no-edit -m "Auto-promote: test → uat"
-          git push origin uat
-          echo "✅ Auto-promoted test → uat"
-
-  # ── Auto-promote: uat → main ───────────────────────────────────
-  auto-promote-to-main:
-    name: "Auto-Promote → Main"
-    needs: [bayanihub-web, damayan-web, hopecard-web, deploy-uat-bayanihub, deploy-uat-damayan, deploy-uat-hopecard]
-    if: >-
-      always() &&
-      github.ref == 'refs/heads/uat' && github.event_name == 'push' &&
-      (needs.bayanihub-web.result == 'success' || needs.bayanihub-web.result == 'skipped') &&
-      (needs.damayan-web.result == 'success' || needs.damayan-web.result == 'skipped') &&
-      (needs.hopecard-web.result == 'success' || needs.hopecard-web.result == 'skipped') &&
-      (needs.deploy-uat-bayanihub.result == 'success' || needs.deploy-uat-bayanihub.result == 'skipped') &&
-      (needs.deploy-uat-damayan.result == 'success' || needs.deploy-uat-damayan.result == 'skipped') &&
-      (needs.deploy-uat-hopecard.result == 'success' || needs.deploy-uat-hopecard.result == 'skipped')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Merge uat → main
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git checkout main
-          git merge origin/uat --no-edit -m "Auto-promote: uat → main"
-          git push origin main
-          echo "✅ Auto-promoted uat → main"
-
-  # ╔══════════════════════════════════════════════════════════════╗
   # ║  STAGE 4 — Pipeline Summary & Notifications                ║
   # ╚══════════════════════════════════════════════════════════════╝
   pipeline-summary:
