@@ -66,30 +66,35 @@ master-pipeline.yml  (per repo — triggers everything)
 ### Branching Strategy
 
 ```
-  feature branch     test branch        uat branch          prod branch
+  feature branch     test branch        uat branch          main branch
   ──────────────     ─────────────      ──────────────      ──────────────
-  Development        CI only            CI + Deploy UAT     CI + Deploy Prod
-  (local work,       (tests, lint,      (same as test,      (same as uat,
-   PR → test)        security,          PLUS deploy to      PLUS production
-                     sonar, build)      UAT environment)    gate approval)
+  Development        CI only            CI + Deploy UAT     CI + Prod Gate
+  (local work,       (tests, lint,      (same as test,      + Deploy Prod
+   PR → test)        security,          PLUS deploy to
+                     sonar, build)      UAT environment)
 
-  Push flow:   feature ──PR──▶ test ──merge──▶ uat ──merge──▶ prod
+  Push flow:   feature ──PR──▶ test ──auto──▶ uat ──auto──▶ main
+                        manual          ↑                    ↑
+                                   auto-promote         auto-promote
+                                   (CI passes)       (CI + deploy passes)
 ```
 
-| Branch | What Runs | Deploy? | Approval? |
-|--------|-----------|---------|----------|
-| `test` | Tests + Lint + Security + SonarCloud + Build | No | No |
-| `uat`  | All CI + Deploy to UAT environment | Yes (UAT) | No |
-| `prod` | All CI + Production Gate + Deploy to Prod | Yes (Prod) | Yes |
+| Branch | What Runs | Deploy? | Auto-Promote? | Manual Step? |
+|--------|-----------|---------|---------------|-------------|
+| `test` | Tests + Lint + Security + SonarCloud + Build | No | → `uat` after CI passes | PR from feature |
+| `uat`  | All CI + Deploy to UAT environment | Yes (UAT) | → `main` after CI + deploy | None |
+| `main` | All CI + Production Gate + Deploy to Prod | Yes (Prod) | — (final) | Production gate approval |
+
+> **Auto-Promotion:** After CI passes on `test`, the pipeline automatically merges into `uat`. After CI + UAT deploy passes on `uat`, it automatically merges into `main`. Only the production gate on `main` requires manual approval.
 
 ### Developer Workflow
 
 1. Dev creates `feature/my-feature` from `test`
 2. Dev pushes commits, opens PR → `test`
 3. CI runs on the PR — reviewer sees green/red checks
-4. Merge to `test` — CI confirms integration is clean
-5. When features are ready, PR `test` → `uat` — QA tests on UAT environment
-6. After QA approval, PR `uat` → `prod` — requires manual gate approval → deploys to production
+4. Merge to `test` — CI runs, and if it passes, **auto-promotes to `uat`**
+5. UAT pipeline runs (CI + deploy) — if it passes, **auto-promotes to `main`**
+6. Main pipeline runs (CI) → **Production Gate (manual approval)** → deploys to production
 
 ---
 
