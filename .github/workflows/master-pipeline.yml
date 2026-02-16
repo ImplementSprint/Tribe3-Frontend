@@ -2,21 +2,21 @@
 # ║  MASTER PIPELINE ORCHESTRATOR                                  ║
 # ║  Coordinates all tribe system pipelines in parallel            ║
 # ║                                                                ║
-# ║  Branch Strategy (auto-promote):                               ║
+# ║  Branch Strategy (feature-based):                              ║
 # ║  ┌──────────────┐                                              ║
 # ║  │  feature/*    │  Developer works on feature branch          ║
 # ║  └────┬─────────┘                                              ║
-# ║       ▼  PR (manual)                                           ║
+# ║       ▼  PR                                                    ║
 # ║  ┌──────────┐                                                  ║
 # ║  │  test     │  CI only → auto-promote to uat                  ║
 # ║  └────┬─────┘                                                  ║
-# ║       ▼  auto                                                  ║
+# ║       ▼  PR                                                    ║
 # ║  ┌──────────┐                                                  ║
 # ║  │  uat      │  CI + Deploy UAT → auto-promote to main         ║
 # ║  └────┬─────┘                                                  ║
-# ║       ▼  auto                                                  ║
+# ║       ▼  PR                                                    ║
 # ║  ┌──────────┐                                                  ║
-# ║  │  main     │  CI + Production Gate (MANUAL) + Deploy Prod    ║
+# ║  │  main     │  CI + Production Gate + Deploy to Prod          ║
 # ║  └──────────┘                                                  ║
 # ║                                                                ║
 # ║  Only 2 manual steps: (1) PR to test, (2) prod gate approval   ║
