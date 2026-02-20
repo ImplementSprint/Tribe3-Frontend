@@ -1,7 +1,7 @@
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  ORCHESTRATOR: Frontend Web CI/CD Pipeline                     ║
-# ║  Composes reusable workflows: test → lint → sonar → build     ║
-# ║  Any tribe can call this with their project directory          ║
+# ║  Composes reusable workflows: test → lint → security → build  ║
+# ║  SonarCloud runs once at the monorepo level (master-pipeline) ║
 # ╚══════════════════════════════════════════════════════════════════╝
 name: "Frontend Web CI/CD Pipeline"
 
@@ -40,21 +40,16 @@ on:
     secrets:
       SONAR_TOKEN:
         required: false
-      SONAR_PROJECT_KEY:
-        required: true
-      SONAR_ORGANIZATION:
-        required: true
 
 jobs:
-  # ── Stage 1A: Unit Tests (Vitest) ───────────────────────────────
+  # ── Stage 1A: Unit Tests ─────────────────────────────────────────
   web-unit-tests:
-    name: "Web — Vitest Unit Tests"
+    name: "Web — Unit Tests"
     uses: ./.github/workflows/frontend-tests.yml
     with:
       working-directory: ${{ inputs.system-dir }}
       system-name: ${{ inputs.system-name }}
       node-version: ${{ inputs.node-version }}
-      test-command: "npx vitest run --coverage --reporter=verbose"
       coverage-threshold: ${{ inputs.coverage-threshold }}
 
   # ── Stage 1B: Lint (parallel with tests) ────────────────────────
@@ -77,24 +72,13 @@ jobs:
       system-name: ${{ inputs.system-name }}
       node-version: ${{ inputs.node-version }}
 
-  # ── Stage 2: SonarCloud Quality Gate ────────────────────────────
-  web-sonarcloud:
-    name: "Web — SonarCloud Analysis"
-    needs: web-unit-tests
-    uses: ./.github/workflows/sonarcloud-scan.yml
-    with:
-      working-directory: ${{ inputs.system-dir }}
-      system-name: ${{ inputs.system-name }}
-      coverage-artifact-name: ${{ inputs.system-name }}-coverage
-    secrets:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-      SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
-      SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
-
-  # ── Stage 3: Build Web Application ─────────────────────────────
+  # ── Stage 2: Build Web Application ─────────────────────────────
   web-build:
     name: "Web — Build"
-    needs: [web-sonarcloud]
+    needs: [web-unit-tests, web-lint, web-security]
+    if: |
+      always() &&
+      !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -113,10 +97,30 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Fix Vite Entry Point
+      - name: Validate Next.js + TypeScript Standard
         run: |
-          if [ -f "public/index.html" ] && [ ! -f "index.html" ]; then
-            mv public/index.html .
+          if [ ! -f "tsconfig.json" ]; then
+            echo "❌ tsconfig.json is required for frontend projects."
+            exit 1
+          fi
+
+          node -e "
+            const pkg = require('./package.json');
+            const hasNext = Boolean(pkg.dependencies?.next);
+            const hasTypeScript = Boolean(pkg.devDependencies?.typescript || pkg.dependencies?.typescript);
+
+            if (!hasNext) {
+              throw new Error('Frontend standard requires Next.js (dependency \"next\" missing).');
+            }
+
+            if (!hasTypeScript) {
+              throw new Error('Frontend standard requires TypeScript (dependency \"typescript\" missing).');
+            }
+          "
+
+          if [ -z "$(find . -type f \( -name '*.ts' -o -name '*.tsx' \) | head -n 1)" ]; then
+            echo "❌ Frontend standard requires TypeScript source files (.ts/.tsx)."
+            exit 1
           fi
 
       - name: Build Application
@@ -126,5 +130,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.system-name }}-web-build
-          path: ${{ inputs.system-dir }}/dist
+          path: ${{ inputs.system-dir }}/.next
           retention-days: 14

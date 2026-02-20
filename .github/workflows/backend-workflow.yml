@@ -1,7 +1,7 @@
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  ORCHESTRATOR: Backend CI/CD Pipeline                          ║
-# ║  Composes reusable workflows: test → lint → sonar → docker    ║
-# ║  Any tribe can call this with their project directory          ║
+# ║  ORCHESTRATOR: Backend CI/CD Pipeline (NestJS + TypeScript)   ║
+# ║  Composes reusable workflows: test → lint → security → docker ║
+# ║  SonarCloud runs once at the monorepo level (master-pipeline) ║
 # ╚══════════════════════════════════════════════════════════════════╝
 name: "Backend CI/CD Pipeline"
 
@@ -55,21 +55,17 @@ on:
     secrets:
       SONAR_TOKEN:
         required: false
-      SONAR_PROJECT_KEY:
-        required: true
-      SONAR_ORGANIZATION:
-        required: true
 
 jobs:
-  # ── Stage 1A: Unit Tests (Jest) ─────────────────────────────────
+  # ── Stage 1A: Unit Tests (NestJS/Jest) ─────────────────────────
   api-unit-tests:
-    name: "API — Jest Unit Tests"
+    name: "API — Unit Tests"
     uses: ./.github/workflows/backend-tests.yml
     with:
       working-directory: ${{ inputs.system-dir }}
       system-name: ${{ inputs.system-name }}
       node-version: ${{ inputs.node-version }}
-      test-command: "npx jest --coverage --verbose --ci --forceExit"
+      test-command: "npm run test:cov"
       integration-test-command: ${{ inputs.integration-test-command }}
       coverage-threshold: ${{ inputs.coverage-threshold }}
 
@@ -93,25 +89,14 @@ jobs:
       system-name: ${{ inputs.system-name }}
       node-version: ${{ inputs.node-version }}
 
-  # ── Stage 2: SonarCloud Quality Gate ────────────────────────────
-  api-sonarcloud:
-    name: "API — SonarCloud Analysis"
-    needs: api-unit-tests
-    uses: ./.github/workflows/sonarcloud-scan.yml
-    with:
-      working-directory: ${{ inputs.system-dir }}
-      system-name: ${{ inputs.system-name }}
-      coverage-artifact-name: ${{ inputs.system-name }}-coverage
-    secrets:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-      SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
-      SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
-
-  # ── Stage 3: Docker Build & Push ────────────────────────────────
+  # ── Stage 2: Docker Build & Push ────────────────────────────────
   api-docker:
     name: "API — Docker Build"
-    if: ${{ inputs.enable-docker-build && inputs.docker-image-name != '' }}
-    needs: [api-sonarcloud]
+    if: |
+      always() &&
+      inputs.enable-docker-build && inputs.docker-image-name != '' &&
+      !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    needs: [api-unit-tests, api-lint, api-security]
     uses: ./.github/workflows/docker-build.yml
     with:
       working-directory: ${{ inputs.system-dir }}

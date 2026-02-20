@@ -1,5 +1,5 @@
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  REUSABLE: Backend Unit & Integration Tests (Jest)             ║
+# ║  REUSABLE: Backend Unit & Integration Tests (NestJS/Jest)      ║
 # ║  Called by any tribe's backend pipeline                        ║
 # ╚══════════════════════════════════════════════════════════════════╝
 name: "Reusable: Backend Unit Tests"
@@ -24,7 +24,7 @@ on:
       test-command:
         required: false
         type: string
-        default: "npx jest --coverage --verbose --ci --forceExit"
+        default: "npm run test:cov"
         description: "Unit test command"
       integration-test-command:
         required: false
@@ -60,7 +60,7 @@ on:
 jobs:
   # ── Unit Tests ───────────────────────────────────────────────────
   backend-unit-tests:
-    name: "Jest Unit Tests"
+    name: "Backend Unit Tests"
     runs-on: ubuntu-latest
     outputs:
       result: ${{ steps.test-run.outcome }}

@@ -2,31 +2,36 @@
 # ║  MASTER PIPELINE ORCHESTRATOR                                  ║
 # ║  Coordinates all tribe system pipelines in parallel            ║
 # ║                                                                ║
-# ║  Branch Strategy:                                              ║
+# ║  Branch Strategy (feature-based):                              ║
+# ║  ┌──────────────┐                                              ║
+# ║  │  feature/*    │  Developer works on feature branch          ║
+# ║  └────┬─────────┘                                              ║
+# ║       ▼  PR                                                    ║
 # ║  ┌──────────┐                                                  ║
-# ║  │  test     │  CI only (tests + lint + security + sonar)      ║
+# ║  │  test     │  CI + Deploy TEST → create PR to uat            ║
 # ║  └────┬─────┘                                                  ║
-# ║       ▼                                                        ║
+# ║       ▼  PR                                                    ║
 # ║  ┌──────────┐                                                  ║
-# ║  │  uat      │  CI + Deploy to UAT environment                 ║
+# ║  │  uat      │  CI + Deploy UAT → create PR to main             ║
 # ║  └────┬─────┘                                                  ║
-# ║       ▼                                                        ║
+# ║       ▼  PR (manual approval)                                  ║
 # ║  ┌──────────┐                                                  ║
-# ║  │  prod     │  CI + Deploy to Prod + Production Gate          ║
+# ║  │  main     │  CI + Production Gate + Deploy to Prod          ║
 # ║  └──────────┘                                                  ║
 # ║                                                                ║
+# ║  Manual branch promotion via PRs: test→uat and uat→main        ║
 # ║  All 3 systems run in PARALLEL at every stage.                 ║
 # ╚══════════════════════════════════════════════════════════════════╝
 name: "Master Pipeline Orchestrator"
 
 on:
   push:
-    branches: [test, uat, prod]
+    branches: [test, uat, main]
   pull_request:
-    branches: [test, uat, prod]
+    branches: [test, uat, main]
 
 permissions:
-  contents: read
+  contents: write
   packages: write
   pull-requests: write
 
@@ -36,129 +41,582 @@ concurrency:
 
 jobs:
   # ╔══════════════════════════════════════════════════════════════╗
+  # ║  STAGE 0 — Detect Changes (skip unchanged sub-projects)    ║
+  # ╚══════════════════════════════════════════════════════════════╝
+  detect-changes:
+    name: "Detect Changed Projects"
+    runs-on: ubuntu-latest
+    outputs:
+      bayanihub-web: ${{ steps.filter.outputs.bayanihub-web }}
+      damayan-web: ${{ steps.filter.outputs.damayan-web }}
+      hopecard-web: ${{ steps.filter.outputs.hopecard-web }}
+      shared: ${{ steps.filter.outputs.shared }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect file changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            bayanihub-web:
+              - 'BayaniHub-Web/**'
+            damayan-web:
+              - 'DAMAYAN-Web/**'
+            hopecard-web:
+              - 'HopeCard-Web/**'
+            shared:
+              - '.github/**'
+              - 'package.json'
+              - 'sonar-project.properties'
+
+  # ╔══════════════════════════════════════════════════════════════╗
   # ║  STAGE 1 — All Frontend Pipelines (PARALLEL)               ║
   # ║  Tests + Lint + Security + SonarCloud + Build               ║
+  # ║  Each only runs if its files changed (or shared files)      ║
   # ╚══════════════════════════════════════════════════════════════╝
   bayanihub-web:
     name: "BayaniHub-Web Pipeline"
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.bayanihub-web == 'true' || needs.detect-changes.outputs.shared == 'true'
     uses: ./.github/workflows/front-end-workflow.yml
     with:
       system-dir: BayaniHub-Web
       system-name: BayaniHub-Web
+      enable-security-scan: true
     secrets: inherit
 
   damayan-web:
     name: "DAMAYAN-Web Pipeline"
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.damayan-web == 'true' || needs.detect-changes.outputs.shared == 'true'
     uses: ./.github/workflows/front-end-workflow.yml
     with:
       system-dir: DAMAYAN-Web
       system-name: DAMAYAN-Web
+      enable-security-scan: true
     secrets: inherit
 
   hopecard-web:
     name: "HopeCard-Web Pipeline"
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.hopecard-web == 'true' || needs.detect-changes.outputs.shared == 'true'
     uses: ./.github/workflows/front-end-workflow.yml
     with:
       system-dir: HopeCard-Web
       system-name: HopeCard-Web
+      enable-security-scan: true
     secrets: inherit
 
   # ╔══════════════════════════════════════════════════════════════╗
-  # ║  STAGE 2 — Deploy to UAT (uat branch only, PARALLEL)       ║
+  # ║  STAGE 1.5 — SonarCloud (single monorepo scan)             ║
+  # ║  Runs ONCE after all sub-project tests pass                 ║
+  # ║  Collects all coverage reports into one analysis            ║
+  # ╚══════════════════════════════════════════════════════════════╝
+  sonarcloud:
+    name: "SonarCloud — Monorepo Analysis"
+    needs: [bayanihub-web, damayan-web, hopecard-web]
+    if: >-
+      always() &&
+      needs.bayanihub-web.result != 'cancelled' &&
+      needs.damayan-web.result != 'cancelled' &&
+      needs.hopecard-web.result != 'cancelled'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download BayaniHub-Web Coverage
+        if: needs.bayanihub-web.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: BayaniHub-Web-coverage
+          path: BayaniHub-Web/coverage
+        continue-on-error: true
+
+      - name: Download DAMAYAN-Web Coverage
+        if: needs.damayan-web.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: DAMAYAN-Web-coverage
+          path: DAMAYAN-Web/coverage
+        continue-on-error: true
+
+      - name: Download HopeCard-Web Coverage
+        if: needs.hopecard-web.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: HopeCard-Web-coverage
+          path: HopeCard-Web/coverage
+        continue-on-error: true
+
+      - name: Run SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonarcloud.io
+        with:
+          args: >
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+
+  # ╔══════════════════════════════════════════════════════════════╗
+  # ║  STAGE 1.6 — Versioning (test branch)                       ║
+  # ║  Creates a git tag on every successful merge to test        ║
+  # ╚══════════════════════════════════════════════════════════════╝
+  version-test:
+    name: "Version Tag — TEST"
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/test' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      version_tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and Push Version Tag
+        id: version
+        run: |
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          TAG="test-v$(date -u +%Y.%m.%d).${GITHUB_RUN_NUMBER}-${SHORT_SHA}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --tags origin | grep -q "refs/tags/${TAG}$"; then
+            echo "tag=${TAG}" >> $GITHUB_OUTPUT
+            echo "ℹ️ Tag already exists: ${TAG}"
+            exit 0
+          fi
+
+          git tag -a "${TAG}" -m "TEST version ${TAG}"
+          git push origin "${TAG}"
+
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "✅ Created version tag: ${TAG}"
+
+  # ╔══════════════════════════════════════════════════════════════╗
+  # ║  STAGE 2 — Deploy to TEST via Vercel (test branch, PARALLEL)║
+  # ║  Uses TEST_VERCEL_PROJECT_ID_* secrets per sub-project      ║
+  # ╚══════════════════════════════════════════════════════════════╝
+  deploy-test-bayanihub:
+    name: "TEST — BayaniHub-Web"
+    needs: [bayanihub-web]
+    if: |
+      always() &&
+      github.ref == 'refs/heads/test' && github.event_name == 'push' &&
+      needs.bayanihub-web.result == 'success'
+    uses: ./.github/workflows/vercel-deploy.yml
+    with:
+      working-directory: BayaniHub-Web
+      environment: preview
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.TEST_VERCEL_PROJECT_ID_BAYANIHUB_WEB }}
+
+  deploy-test-damayan:
+    name: "TEST — DAMAYAN-Web"
+    needs: [damayan-web]
+    if: |
+      always() &&
+      github.ref == 'refs/heads/test' && github.event_name == 'push' &&
+      needs.damayan-web.result == 'success'
+    uses: ./.github/workflows/vercel-deploy.yml
+    with:
+      working-directory: DAMAYAN-Web
+      environment: preview
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.TEST_VERCEL_PROJECT_ID_DAMAYAN_WEB }}
+
+  deploy-test-hopecard:
+    name: "TEST — HopeCard-Web"
+    needs: [hopecard-web]
+    if: |
+      always() &&
+      github.ref == 'refs/heads/test' && github.event_name == 'push' &&
+      needs.hopecard-web.result == 'success'
+    uses: ./.github/workflows/vercel-deploy.yml
+    with:
+      working-directory: HopeCard-Web
+      environment: preview
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.TEST_VERCEL_PROJECT_ID_HOPECARD_WEB }}
+
+  # ╔══════════════════════════════════════════════════════════════╗
+  # ║  STAGE 3 — Deploy to UAT via Vercel (uat branch, PARALLEL)  ║
+  # ║  Uses UAT_VERCEL_PROJECT_ID_* secrets per sub-project       ║
   # ╚══════════════════════════════════════════════════════════════╝
   deploy-uat-bayanihub:
     name: "UAT — BayaniHub-Web"
     needs: [bayanihub-web]
-    if: github.ref == 'refs/heads/uat' && github.event_name == 'push'
-    uses: ./.github/workflows/deploy-staging.yml
+    if: |
+      always() &&
+      github.ref == 'refs/heads/uat' && github.event_name == 'push' &&
+      needs.bayanihub-web.result == 'success'
+    uses: ./.github/workflows/vercel-deploy.yml
     with:
-      system-dir: BayaniHub-Web
-      system-name: BayaniHub-Web
-      app-type: web
-      artifact-name: BayaniHub-Web-web-build
-      deploy-environment: uat
-    secrets: inherit
+      working-directory: BayaniHub-Web
+      environment: preview
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.UAT_VERCEL_PROJECT_ID_BAYANIHUB_WEB }}
 
   deploy-uat-damayan:
     name: "UAT — DAMAYAN-Web"
     needs: [damayan-web]
-    if: github.ref == 'refs/heads/uat' && github.event_name == 'push'
-    uses: ./.github/workflows/deploy-staging.yml
+    if: |
+      always() &&
+      github.ref == 'refs/heads/uat' && github.event_name == 'push' &&
+      needs.damayan-web.result == 'success'
+    uses: ./.github/workflows/vercel-deploy.yml
     with:
-      system-dir: DAMAYAN-Web
-      system-name: DAMAYAN-Web
-      app-type: web
-      artifact-name: DAMAYAN-Web-web-build
-      deploy-environment: uat
-    secrets: inherit
+      working-directory: DAMAYAN-Web
+      environment: preview
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.UAT_VERCEL_PROJECT_ID_DAMAYAN_WEB }}
 
   deploy-uat-hopecard:
     name: "UAT — HopeCard-Web"
     needs: [hopecard-web]
-    if: github.ref == 'refs/heads/uat' && github.event_name == 'push'
-    uses: ./.github/workflows/deploy-staging.yml
+    if: |
+      always() &&
+      github.ref == 'refs/heads/uat' && github.event_name == 'push' &&
+      needs.hopecard-web.result == 'success'
+    uses: ./.github/workflows/vercel-deploy.yml
     with:
-      system-dir: HopeCard-Web
-      system-name: HopeCard-Web
-      app-type: web
-      artifact-name: HopeCard-Web-web-build
-      deploy-environment: uat
-    secrets: inherit
+      working-directory: HopeCard-Web
+      environment: preview
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.UAT_VERCEL_PROJECT_ID_HOPECARD_WEB }}
 
   # ╔══════════════════════════════════════════════════════════════╗
-  # ║  STAGE 3 — Deploy to Prod (prod branch only, PARALLEL)     ║
+  # ║  STAGE 4 — Deploy to Prod via Vercel (main branch only)    ║
+  # ║  Uses PROD_VERCEL_PROJECT_ID_* secrets per sub-project     ║
+  # ║  Step 1: Production gate (checklist + audit)               ║
+  # ║  Step 2: Deploy to Prod via Vercel                         ║
   # ╚══════════════════════════════════════════════════════════════╝
-  deploy-prod-bayanihub:
-    name: "Prod — BayaniHub-Web"
-    needs: [bayanihub-web]
-    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
-    uses: ./.github/workflows/deploy-staging.yml
-    with:
-      system-dir: BayaniHub-Web
-      system-name: BayaniHub-Web
-      app-type: web
-      artifact-name: BayaniHub-Web-web-build
-      deploy-environment: prod
-    secrets: inherit
 
-  deploy-prod-damayan:
-    name: "Prod — DAMAYAN-Web"
-    needs: [damayan-web]
-    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
-    uses: ./.github/workflows/deploy-staging.yml
-    with:
-      system-dir: DAMAYAN-Web
-      system-name: DAMAYAN-Web
-      app-type: web
-      artifact-name: DAMAYAN-Web-web-build
-      deploy-environment: prod
-    secrets: inherit
-
-  deploy-prod-hopecard:
-    name: "Prod — HopeCard-Web"
-    needs: [hopecard-web]
-    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
-    uses: ./.github/workflows/deploy-staging.yml
-    with:
-      system-dir: HopeCard-Web
-      system-name: HopeCard-Web
-      app-type: web
-      artifact-name: HopeCard-Web-web-build
-      deploy-environment: prod
-    secrets: inherit
-
-  # ╔══════════════════════════════════════════════════════════════╗
-  # ║  STAGE 4 — Production Gate (prod branch only)              ║
-  # ╚══════════════════════════════════════════════════════════════╝
+  # ── Step 3A: Production Gate ───────────────────────────────────
   production-gate:
     name: "Production Readiness Gate"
-    needs: [deploy-prod-bayanihub, deploy-prod-damayan, deploy-prod-hopecard]
-    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    needs: [bayanihub-web, damayan-web, hopecard-web]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/main' && github.event_name == 'push' &&
+      (needs.bayanihub-web.result == 'success' || needs.bayanihub-web.result == 'skipped') &&
+      (needs.damayan-web.result == 'success' || needs.damayan-web.result == 'skipped') &&
+      (needs.hopecard-web.result == 'success' || needs.hopecard-web.result == 'skipped')
     uses: ./.github/workflows/production-gate.yml
     with:
       system-dir: Tribe3-Frontend
       app-type: web
     secrets: inherit
+
+  # ── Step 3B: Deploy to Prod via Vercel (after gate) ────────────
+  deploy-prod-bayanihub:
+    name: "Prod — BayaniHub-Web"
+    needs: [production-gate]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    uses: ./.github/workflows/vercel-deploy.yml
+    with:
+      working-directory: BayaniHub-Web
+      environment: production
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.PROD_VERCEL_PROJECT_ID_BAYANIHUB_WEB }}
+
+  deploy-prod-damayan:
+    name: "Prod — DAMAYAN-Web"
+    needs: [production-gate]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    uses: ./.github/workflows/vercel-deploy.yml
+    with:
+      working-directory: DAMAYAN-Web
+      environment: production
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.PROD_VERCEL_PROJECT_ID_DAMAYAN_WEB }}
+
+  deploy-prod-hopecard:
+    name: "Prod — HopeCard-Web"
+    needs: [production-gate]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    uses: ./.github/workflows/vercel-deploy.yml
+    with:
+      working-directory: HopeCard-Web
+      environment: production
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.PROD_VERCEL_PROJECT_ID_HOPECARD_WEB }}
+
+  # ╔══════════════════════════════════════════════════════════════╗
+  # ║  STAGE 5 — Build & Push Docker Images to GHCR (main only)  ║
+  # ║  One image per frontend app                                 ║
+  # ╚══════════════════════════════════════════════════════════════╝
+  docker-main-bayanihub:
+    name: "GHCR — BayaniHub-Web"
+    needs: [production-gate]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    uses: ./.github/workflows/docker-build.yml
+    with:
+      working-directory: BayaniHub-Web
+      image-name: bayanihub-web
+      push-image: true
+      scan-vulnerabilities: true
+    secrets: inherit
+
+  docker-main-damayan:
+    name: "GHCR — DAMAYAN-Web"
+    needs: [production-gate]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    uses: ./.github/workflows/docker-build.yml
+    with:
+      working-directory: DAMAYAN-Web
+      image-name: damayan-web
+      push-image: true
+      scan-vulnerabilities: true
+    secrets: inherit
+
+  docker-main-hopecard:
+    name: "GHCR — HopeCard-Web"
+    needs: [production-gate]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    uses: ./.github/workflows/docker-build.yml
+    with:
+      working-directory: HopeCard-Web
+      image-name: hopecard-web
+      push-image: true
+      scan-vulnerabilities: true
+    secrets: inherit
+
+  # ╔══════════════════════════════════════════════════════════════╗
+  # ║  PROMOTION — PR-based branch progression                    ║
+  # ║  test → uat: create PR with TEST Vercel links              ║
+  # ║  uat → main: creates PR with UAT Vercel links              ║
+  # ╚══════════════════════════════════════════════════════════════╝
+
+  # ── Promotion: test → uat (creates PR for manual approval) ────
+  create-pr-to-uat:
+    name: "Create PR → UAT"
+    needs: [bayanihub-web, damayan-web, hopecard-web, version-test, deploy-test-bayanihub, deploy-test-damayan, deploy-test-hopecard]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/test' && github.event_name == 'push' &&
+      (needs.bayanihub-web.result == 'success' || needs.bayanihub-web.result == 'skipped') &&
+      (needs.damayan-web.result == 'success' || needs.damayan-web.result == 'skipped') &&
+      (needs.hopecard-web.result == 'success' || needs.hopecard-web.result == 'skipped') &&
+      needs.version-test.result == 'success' &&
+      (needs.deploy-test-bayanihub.result == 'success' || needs.deploy-test-bayanihub.result == 'skipped') &&
+      (needs.deploy-test-damayan.result == 'success' || needs.deploy-test-damayan.result == 'skipped') &&
+      (needs.deploy-test-hopecard.result == 'success' || needs.deploy-test-hopecard.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create PR from test → uat
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          EXISTING_PR=$(gh pr list --base uat --head test --state open --json number --jq '.[0].number' 2>/dev/null || true)
+
+          BAYANIHUB_URL="${{ needs.deploy-test-bayanihub.outputs.deployment_url }}"
+          DAMAYAN_URL="${{ needs.deploy-test-damayan.outputs.deployment_url }}"
+          HOPECARD_URL="${{ needs.deploy-test-hopecard.outputs.deployment_url }}"
+          VERSION_TAG="${{ needs.version-test.outputs.version_tag }}"
+          COMMIT_SHA="${{ github.sha }}"
+          SHORT_SHA="${COMMIT_SHA:0:7}"
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+          PR_BODY=$(cat <<ENDOFBODY
+          ## 🚀 Promote TEST → UAT
+
+          This PR was **automatically created** after all CI checks and TEST deployments passed on the \`test\` branch.
+
+          ### 📋 Pre-merge Checklist
+          - [ ] Verified BayaniHub-Web on TEST
+          - [ ] Verified DAMAYAN-Web on TEST
+          - [ ] Verified HopeCard-Web on TEST
+          - [ ] Ready for UAT validation
+
+          ### 🔗 Vercel TEST Deployment Links
+          | System | TEST Preview Link |
+          |--------|-------------------|
+          | BayaniHub-Web | ${BAYANIHUB_URL:-Not deployed (no changes)} |
+          | DAMAYAN-Web | ${DAMAYAN_URL:-Not deployed (no changes)} |
+          | HopeCard-Web | ${HOPECARD_URL:-Not deployed (no changes)} |
+
+          ### 🔍 Details
+          - **Source branch:** test
+          - **Target branch:** uat
+          - **Version tag:** \`${VERSION_TAG}\`
+          - **Commit:** \`${SHORT_SHA}\`
+          - **Triggered at:** ${TIMESTAMP}
+          - **Pipeline run:** [View workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+          ---
+          *Merge this PR to trigger UAT deployment.*
+          ENDOFBODY
+          )
+
+          if [ -n "$EXISTING_PR" ]; then
+            gh pr edit "$EXISTING_PR" --body "$PR_BODY"
+            echo "✅ Updated PR #$EXISTING_PR: test → uat"
+            exit 0
+          fi
+
+          gh pr create \
+            --base uat \
+            --head test \
+            --title "🚀 Release: Promote TEST → UAT (${SHORT_SHA})" \
+            --body "$PR_BODY"
+
+          echo "✅ Created PR: test → uat"
+
+  # ── Promotion: uat → main (creates PR for manual approval) ──────
+  create-pr-to-main:
+    name: "Create PR → Main"
+    needs: [bayanihub-web, damayan-web, hopecard-web, deploy-uat-bayanihub, deploy-uat-damayan, deploy-uat-hopecard]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/uat' && github.event_name == 'push' &&
+      (needs.bayanihub-web.result == 'success' || needs.bayanihub-web.result == 'skipped') &&
+      (needs.damayan-web.result == 'success' || needs.damayan-web.result == 'skipped') &&
+      (needs.hopecard-web.result == 'success' || needs.hopecard-web.result == 'skipped') &&
+      (needs.deploy-uat-bayanihub.result == 'success' || needs.deploy-uat-bayanihub.result == 'skipped') &&
+      (needs.deploy-uat-damayan.result == 'success' || needs.deploy-uat-damayan.result == 'skipped') &&
+      (needs.deploy-uat-hopecard.result == 'success' || needs.deploy-uat-hopecard.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create PR from uat → main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Check if an open PR from uat → main already exists
+          EXISTING_PR=$(gh pr list --base main --head uat --state open --json number --jq '.[0].number' 2>/dev/null || true)
+
+          if [ -n "$EXISTING_PR" ]; then
+            echo "✅ PR #$EXISTING_PR already exists (uat → main). Updating with latest deploy URLs..."
+
+            # Build updated body with real Vercel URLs
+            BAYANIHUB_URL="${{ needs.deploy-uat-bayanihub.outputs.deployment_url }}"
+            DAMAYAN_URL="${{ needs.deploy-uat-damayan.outputs.deployment_url }}"
+            HOPECARD_URL="${{ needs.deploy-uat-hopecard.outputs.deployment_url }}"
+            COMMIT_SHA="${{ github.sha }}"
+            SHORT_SHA="${COMMIT_SHA:0:7}"
+            TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+            UPDATE_BODY=$(cat <<ENDOFBODY
+          ## 🚀 Promote UAT → Production
+
+          This PR was **automatically created** after all CI checks and UAT deployments passed on the \`uat\` branch.
+
+          ### 📋 Pre-merge Checklist
+          - [ ] Verified BayaniHub-Web on UAT
+          - [ ] Verified DAMAYAN-Web on UAT
+          - [ ] Verified HopeCard-Web on UAT
+          - [ ] All acceptance criteria met
+
+          ### 🔗 Vercel UAT Deployment Links
+          | System | UAT Preview Link |
+          |--------|------------------|
+          | BayaniHub-Web | ${BAYANIHUB_URL:-Not deployed (no changes)} |
+          | DAMAYAN-Web | ${DAMAYAN_URL:-Not deployed (no changes)} |
+          | HopeCard-Web | ${HOPECARD_URL:-Not deployed (no changes)} |
+
+          ### 🔍 Details
+          - **Source branch:** uat
+          - **Target branch:** main
+          - **Latest commit:** \`${SHORT_SHA}\`
+          - **Updated at:** ${TIMESTAMP}
+          - **Pipeline run:** [View workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+          ---
+          *Merge this PR to deploy to production. A production readiness gate will run automatically.*
+          ENDOFBODY
+            )
+
+            gh pr edit "$EXISTING_PR" --body "$UPDATE_BODY"
+            echo "✅ Updated PR #$EXISTING_PR with latest deployment URLs"
+            exit 0
+          fi
+
+          # Collect deployment URLs from UAT Vercel deploys
+          BAYANIHUB_URL="${{ needs.deploy-uat-bayanihub.outputs.deployment_url }}"
+          DAMAYAN_URL="${{ needs.deploy-uat-damayan.outputs.deployment_url }}"
+          HOPECARD_URL="${{ needs.deploy-uat-hopecard.outputs.deployment_url }}"
+          COMMIT_SHA="${{ github.sha }}"
+          SHORT_SHA="${COMMIT_SHA:0:7}"
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+          PR_BODY=$(cat <<ENDOFBODY
+          ## 🚀 Promote UAT → Production
+
+          This PR was **automatically created** after all CI checks and UAT deployments passed on the \`uat\` branch.
+
+          ### 📋 Pre-merge Checklist
+          - [ ] Verified BayaniHub-Web on UAT
+          - [ ] Verified DAMAYAN-Web on UAT
+          - [ ] Verified HopeCard-Web on UAT
+          - [ ] All acceptance criteria met
+
+          ### 🔗 Vercel UAT Deployment Links
+          | System | UAT Preview Link |
+          |--------|------------------|
+          | BayaniHub-Web | ${BAYANIHUB_URL:-Not deployed (no changes)} |
+          | DAMAYAN-Web | ${DAMAYAN_URL:-Not deployed (no changes)} |
+          | HopeCard-Web | ${HOPECARD_URL:-Not deployed (no changes)} |
+
+          ### 🔍 Details
+          - **Source branch:** uat
+          - **Target branch:** main
+          - **Commit:** \`${SHORT_SHA}\`
+          - **Triggered at:** ${TIMESTAMP}
+          - **Pipeline run:** [View workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+          ---
+          *Merge this PR to deploy to production. A production readiness gate will run automatically.*
+          ENDOFBODY
+          )
+
+          gh pr create \
+            --base main \
+            --head uat \
+            --title "🚀 Release: Promote UAT → Production (${SHORT_SHA})" \
+            --body "$PR_BODY"
+
+          echo "✅ Created PR: uat → main"
 
   # ╔══════════════════════════════════════════════════════════════╗
   # ║  STAGE 4 — Pipeline Summary & Notifications                ║
