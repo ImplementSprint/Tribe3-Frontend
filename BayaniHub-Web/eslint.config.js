@@ -5,7 +5,7 @@ import reactHooksPlugin from 'eslint-plugin-react-hooks';
 import tsParser from '@typescript-eslint/parser';
 
 export default [
-  { ignores: ['.next/', 'coverage/', 'node_modules/'] },
+  { ignores: ['.next/', 'dist/', 'build/', 'out/', 'coverage/', 'node_modules/'] },
 
   js.configs.recommended,
 
@@ -45,6 +45,15 @@ export default [
     languageOptions: {
       globals: {
         ...globals.jest,
+      },
+    },
+  },
+
+  {
+    files: ['jest.config.js', 'jest.setup.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
       },
     },
   },
