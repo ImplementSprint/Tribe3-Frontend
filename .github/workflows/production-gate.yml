@@ -62,12 +62,12 @@ jobs:
 
           PASS=true
 
-          # Check: Must be on prod branch
-          if [ "${{ github.ref_name }}" != "prod" ]; then
-            echo "║ ❌ Not on prod branch"
+          # Check: Must be on main branch
+          if [ "${{ github.ref_name }}" != "main" ]; then
+            echo "║ ❌ Not on main branch"
             PASS=false
           else
-            echo "║ ✅ On prod branch"
+            echo "║ ✅ On main branch"
           fi
 
           # Check: Must have staging artifacts

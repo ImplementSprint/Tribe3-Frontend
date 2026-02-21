@@ -1,5 +1,5 @@
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  ORCHESTRATOR: Backend CI/CD Pipeline                          ║
+# ║  ORCHESTRATOR: Backend CI/CD Pipeline (NestJS + TypeScript)   ║
 # ║  Composes reusable workflows: test → lint → security → docker ║
 # ║  SonarCloud runs once at the monorepo level (master-pipeline) ║
 # ╚══════════════════════════════════════════════════════════════════╝
@@ -57,15 +57,15 @@ on:
         required: false
 
 jobs:
-  # ── Stage 1A: Unit Tests (Jest) ─────────────────────────────────
+  # ── Stage 1A: Unit Tests (NestJS/Jest) ─────────────────────────
   api-unit-tests:
-    name: "API — Jest Unit Tests"
+    name: "API — Unit Tests"
     uses: ./.github/workflows/backend-tests.yml
     with:
       working-directory: ${{ inputs.system-dir }}
       system-name: ${{ inputs.system-name }}
       node-version: ${{ inputs.node-version }}
-      test-command: "npx jest --coverage --verbose --ci --forceExit"
+      test-command: "npm run test:cov"
       integration-test-command: ${{ inputs.integration-test-command }}
       coverage-threshold: ${{ inputs.coverage-threshold }}
 

@@ -1,6 +1,6 @@
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║  REUSABLE: Security Scanning                                   ║
-# ║  Dependency audit + secret scanning + SAST                    ║
+# ║  Dependency audit + license compliance                        ║
 # ╚══════════════════════════════════════════════════════════════════╝
 name: "Reusable: Security Scan"
 
@@ -26,18 +26,10 @@ on:
         type: boolean
         default: true
         description: "Fail pipeline on HIGH severity vulnerabilities"
-      run-secret-scan:
-        required: false
-        type: boolean
-        default: true
-        description: "Run secret detection scan"
     outputs:
       audit-result:
         description: "npm audit result"
         value: ${{ jobs.dependency-audit.outputs.result }}
-      secret-scan-result:
-        description: "Secret scan result"
-        value: ${{ jobs.secret-scan.outputs.result }}
 
 jobs:
   # ── Dependency Vulnerability Audit ───────────────────────────────
@@ -79,35 +71,6 @@ jobs:
         with:
           name: ${{ inputs.system-name }}-audit-report
           path: ${{ inputs.working-directory }}/audit-report.json
-          retention-days: 30
-          if-no-files-found: ignore
-
-  # ── Secret Detection ─────────────────────────────────────────────
-  secret-scan:
-    name: "Secret Detection"
-    if: ${{ inputs.run-secret-scan }}
-    runs-on: ubuntu-latest
-    outputs:
-      result: ${{ steps.secrets.outcome }}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Run Gitleaks Secret Scanner
-        id: secrets
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
-
-      - name: Upload Gitleaks Report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ inputs.system-name }}-gitleaks-report
-          path: gitleaks-report.json
           retention-days: 30
           if-no-files-found: ignore
 

@@ -42,15 +42,14 @@ on:
         required: false
 
 jobs:
-  # ── Stage 1A: Unit Tests (Vitest) ───────────────────────────────
+  # ── Stage 1A: Unit Tests ─────────────────────────────────────────
   web-unit-tests:
-    name: "Web — Vitest Unit Tests"
+    name: "Web — Unit Tests"
     uses: ./.github/workflows/frontend-tests.yml
     with:
       working-directory: ${{ inputs.system-dir }}
       system-name: ${{ inputs.system-name }}
       node-version: ${{ inputs.node-version }}
-      test-command: "npx vitest run --coverage --reporter=verbose"
       coverage-threshold: ${{ inputs.coverage-threshold }}
 
   # ── Stage 1B: Lint (parallel with tests) ────────────────────────
@@ -98,6 +97,32 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
+      - name: Validate Next.js + TypeScript Standard
+        run: |
+          if [ ! -f "tsconfig.json" ]; then
+            echo "❌ tsconfig.json is required for frontend projects."
+            exit 1
+          fi
+
+          node -e "
+            const pkg = require('./package.json');
+            const hasNext = Boolean(pkg.dependencies?.next);
+            const hasTypeScript = Boolean(pkg.devDependencies?.typescript || pkg.dependencies?.typescript);
+
+            if (!hasNext) {
+              throw new Error('Frontend standard requires Next.js (dependency \"next\" missing).');
+            }
+
+            if (!hasTypeScript) {
+              throw new Error('Frontend standard requires TypeScript (dependency \"typescript\" missing).');
+            }
+          "
+
+          if [ -z "$(find . -type f \( -name '*.ts' -o -name '*.tsx' \) | head -n 1)" ]; then
+            echo "❌ Frontend standard requires TypeScript source files (.ts/.tsx)."
+            exit 1
+          fi
+
       - name: Build Application
         run: npm run build
 
@@ -105,5 +130,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.system-name }}-web-build
-          path: ${{ inputs.system-dir }}/dist
+          path: ${{ inputs.system-dir }}/.next
           retention-days: 14

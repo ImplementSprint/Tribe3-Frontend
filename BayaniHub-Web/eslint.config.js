@@ -2,19 +2,21 @@ import js from '@eslint/js';
 import globals from 'globals';
 import reactPlugin from 'eslint-plugin-react';
 import reactHooksPlugin from 'eslint-plugin-react-hooks';
+import tsParser from '@typescript-eslint/parser';
 
 export default [
-  { ignores: ['dist/', 'coverage/', 'node_modules/'] },
+  { ignores: ['.next/', 'dist/', 'build/', 'out/', 'coverage/', 'node_modules/'] },
 
   js.configs.recommended,
 
   {
-    files: ['**/*.{js,jsx}'],
+    files: ['**/*.{js,jsx,ts,tsx}'],
     plugins: {
       react: reactPlugin,
       'react-hooks': reactHooksPlugin,
     },
     languageOptions: {
+      parser: tsParser,
       ecmaVersion: 'latest',
       sourceType: 'module',
       globals: {
@@ -39,11 +41,19 @@ export default [
   },
 
   {
-    files: ['tests/**/*.{js,jsx}'],
+    files: ['tests/**/*.{js,jsx,ts,tsx}'],
     languageOptions: {
       globals: {
         ...globals.jest,
-        ...globals.vitest,
+      },
+    },
+  },
+
+  {
+    files: ['jest.config.js', 'jest.setup.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
       },
     },
   },

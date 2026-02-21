@@ -51,7 +51,7 @@ master-pipeline.yml  (per repo — triggers everything)
   │    ├─ frontend-tests.yml         ├─ backend-tests.yml        ├─ mobile-tests.yml
   │    ├─ lint-check.yml             ├─ lint-check.yml           ├─ lint-check.yml
   │    ├─ security-scan.yml          ├─ security-scan.yml        ├─ security-scan.yml
-  │    └─ Build (vite build)         ├─ docker-build.yml         └─ Android APK (optional)
+  │    └─ Build (next build)         ├─ docker-build.yml         └─ Android APK (optional)
   │                                  └─ Deploy
   │
   ├─ SonarCloud scan            (runs ONCE per repo — monorepo-level analysis)
@@ -66,30 +66,37 @@ master-pipeline.yml  (per repo — triggers everything)
 ### Branching Strategy
 
 ```
-  feature branch     test branch        uat branch          prod branch
+  feature branch     test branch        uat branch          main branch
   ──────────────     ─────────────      ──────────────      ──────────────
-  Development        CI only            CI + Deploy UAT     CI + Deploy Prod
-  (local work,       (tests, lint,      (same as test,      (same as uat,
-   PR → test)        security,          PLUS deploy to      PLUS production
-                     sonar, build)      UAT environment)    gate approval)
+  Development        CI only            CI + Deploy UAT     CI + Prod Gate
+  (local work,       (tests, lint,      (same as test,      + Deploy Prod
+   PR → test)        security,          PLUS deploy to
+                     sonar, build)      UAT environment)
 
-  Push flow:   feature ──PR──▶ test ──merge──▶ uat ──merge──▶ prod
+  Push flow:   feature ──PR──▶ test ──auto──▶ uat ──auto──▶ main
+                        manual          ↑                    ↑
+                                   auto-promote         auto-promote
+                                   (CI passes)       (CI + deploy passes)
 ```
 
-| Branch | What Runs | Deploy? | Approval? |
-|--------|-----------|---------|----------|
-| `test` | Tests + Lint + Security + SonarCloud + Build | No | No |
-| `uat`  | All CI + Deploy to UAT environment | Yes (UAT) | No |
-| `prod` | All CI + Production Gate + Deploy to Prod | Yes (Prod) | Yes |
+| Branch | What Runs | Deploy? | Auto-Promote? | Manual Step? |
+|--------|-----------|---------|---------------|-------------|
+| `test` | Tests + Lint + Security + SonarCloud + Build | No | → `uat` after CI passes | PR from feature |
+| `uat`  | All CI + Deploy to UAT environment | Yes (UAT) | → `main` after CI + deploy | None |
+| `main` | All CI + Production Gate + Deploy to Prod | Yes (Prod) | — (final) | Production gate approval |
+
+> **PR Promotion:** After CI + TEST deploy passes on `test`, the pipeline auto-creates a PR to `uat` (manual merge). After CI + UAT deploy passes on `uat`, it auto-creates a PR to `main` (manual merge). Production gate approval still applies on `main`.
 
 ### Developer Workflow
 
 1. Dev creates `feature/my-feature` from `test`
 2. Dev pushes commits, opens PR → `test`
 3. CI runs on the PR — reviewer sees green/red checks
-4. Merge to `test` — CI confirms integration is clean
-5. When features are ready, PR `test` → `uat` — QA tests on UAT environment
-6. After QA approval, PR `uat` → `prod` — requires manual gate approval → deploys to production
+4. Merge to `test` — CI + TEST deploy runs
+5. Pipeline auto-creates PR: `test → uat` (manual merge)
+6. Merge to `uat` — CI + UAT deploy runs
+7. Pipeline auto-creates PR: `uat → main` (manual merge)
+8. Main pipeline runs (CI) → **Production Gate (manual approval)** → deploys to production
 
 ---
 
@@ -185,7 +192,7 @@ Copy these files into `.github/workflows/`:
 | `front-end-workflow.yml` | Frontend orchestrator (tests→lint→security→build) |
 | `frontend-tests.yml` | Vitest unit tests + coverage |
 | `lint-check.yml` | ESLint checks |
-| `security-scan.yml` | npm audit + Gitleaks |
+| `security-scan.yml` | npm audit + license check |
 | `deploy-staging.yml` | Staging deployment |
 | `production-gate.yml` | Production approval gate |
 | `governance-check.yml` | Coverage governance |
@@ -221,7 +228,7 @@ Use `mobile-workflow.yml` in your `master-pipeline.yml`.
 
 ## 6. Frontend Repo Setup
 
-> All frontend projects use **React + Vite**. Every React project **must** have an `index.html` at its root — this is the Vite entry point that loads `src/main.jsx`.
+> All new frontend projects use **Next.js with TypeScript** (App Router recommended).
 
 Each frontend system (at root or subdirectory) needs these files:
 
@@ -232,17 +239,16 @@ Each frontend system (at root or subdirectory) needs these files:
 ```
 Tribe-Frontend/
 ├── .github/workflows/         ← all reusable workflow files + master-pipeline.yml
-├── src/
-│   ├── App.jsx
-│   └── main.jsx
+├── app/
+│   └── page.jsx
 ├── tests/
 │   └── ui.test.js
 ├── package.json
 ├── package-lock.json          ← REQUIRED (run npm install to generate)
-├── vitest.config.ts           ← jsdom + v8 coverage
+├── next.config.js
 ├── eslint.config.js           ← ESLint v9 flat config
 ├── sonar-project.properties   ← SonarCloud config (sources, tests, exclusions)
-└── index.html                 ← Vite entry point
+└── next-env.d.ts              ← if using TypeScript
 ```
 
 **Multi-system monorepo (multiple frontends as subdirectories):**
@@ -251,13 +257,13 @@ Tribe-Frontend/
 Tribe-Frontend/
 ├── .github/workflows/
 ├── SystemA-Web/
-│   ├── src/
+│   ├── app/
 │   ├── tests/
 │   ├── package.json
 │   ├── package-lock.json
-│   ├── vitest.config.ts
+│   ├── next.config.js
 │   ├── eslint.config.js
-│   └── index.html
+│   └── next-env.d.ts
 ├── SystemB-Web/
 │   ├── ... (same structure)
 ├── SystemC-Web/
@@ -273,22 +279,21 @@ Tribe-Frontend/
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "test": "vitest run --coverage",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "next test",
     "lint": "eslint ."
   },
   "dependencies": {
+    "next": "^14.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.0.0",
-    "@vitest/coverage-v8": "^4.0.18",
-    "jsdom": "^28.1.0",
-    "vite": "^4.3.9",
-    "vitest": "^4.0.18",
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
     "eslint": "^9.0.0",
     "@eslint/js": "^9.0.0",
     "globals": "^15.0.0",
@@ -384,21 +389,13 @@ sonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/**
 
 > **Note:** `sonar.organization` and `sonar.projectKey` are NOT in the properties file — they come from GitHub Secrets and are passed via CLI args in the workflow.
 
-### index.html
+### Next.js App Entry
 
-```html
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Your App Name</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
-</html>
+```jsx
+// app/page.jsx
+export default function Page() {
+  return <main>Hello Next.js</main>;
+}
 ```
 
 ### tests/ui.test.js (starter)
@@ -419,7 +416,7 @@ describe('App', () => {
 npm install
 npm test          # verify vitest passes
 npm run lint      # verify eslint passes
-npm run build     # verify vite build works
+npm run build     # verify next build works
 ```
 
 ---
@@ -432,12 +429,16 @@ npm run build     # verify vite build works
 your-backend-repo/
 ├── .github/workflows/         ← all reusable workflow files + master-pipeline.yml
 ├── src/
-│   └── index.js               ← Express/Fastify entry point
+│   ├── main.ts                ← NestJS bootstrap entry point
+│   ├── app.module.ts          ← Root module
+│   └── ...
 ├── tests/
 │   └── api.test.js
 ├── package.json
 ├── package-lock.json          ← REQUIRED
 ├── jest.config.js             ← Jest config with coverage
+├── tsconfig.json
+├── tsconfig.build.json
 ├── eslint.config.js           ← ESLint v9 flat config
 ├── sonar-project.properties   ← SonarCloud config
 └── Dockerfile                 ← (optional) for Docker build
@@ -451,18 +452,30 @@ your-backend-repo/
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
-    "test": "jest --coverage --verbose --ci --forceExit",
+    "build": "nest build",
+    "start": "node dist/main",
+    "start:dev": "nest start --watch",
+    "test": "jest",
+    "test:cov": "jest --coverage",
+    "test:e2e": "jest --config ./test/jest-e2e.json",
     "lint": "eslint ."
   },
   "dependencies": {
-    "express": "^4.18.0"
+    "@nestjs/common": "^10.0.0",
+    "@nestjs/core": "^10.0.0",
+    "@nestjs/platform-express": "^10.0.0",
+    "reflect-metadata": "^0.2.0",
+    "rxjs": "^7.8.0"
   },
   "devDependencies": {
+    "@nestjs/cli": "^10.0.0",
+    "@nestjs/testing": "^10.0.0",
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
     "jest": "^29.7.0",
     "supertest": "^6.3.0",
-    "nodemon": "^3.1.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.0.0",
     "eslint": "^9.0.0",
     "@eslint/js": "^9.0.0",
     "globals": "^15.0.0"
@@ -531,7 +544,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 COPY . .
 EXPOSE 3000
-CMD ["node", "src/index.js"]
+CMD ["node", "dist/main"]
 ```
 
 ### Setup Commands
@@ -1439,7 +1452,7 @@ For each repository:
 | SonarCloud "Project not found" | Wrong project key or org | Verify `SONAR_PROJECT_KEY` and `SONAR_ORGANIZATION` secrets match sonarcloud.io |
 | SonarCloud job skipped | `if` condition too strict or upstream cancelled | Use `!= 'cancelled'` instead of `== 'success'` in the condition |
 | ESLint "config not found" | No ESLint config | Create `eslint.config.js` |
-| Build fails "no index.html" | Missing Vite entry | Add `index.html` at system root (frontend only) |
+| Build fails "Cannot find module 'next'" | Next.js not installed | Add `next` dependency and run `npm install` |
 | Docker build fails | Missing `Dockerfile` | Create Dockerfile in repo root (backend only) |
 | Android build fails | Missing `android/gradlew` | Ensure React Native android dir exists (mobile only) |
 | Secret not found | Repo secret not set | Go to repo Settings → Secrets → add missing secret |
