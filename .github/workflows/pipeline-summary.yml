@@ -30,6 +30,18 @@ on:
         required: false
         type: string
         default: ""
+      systems-json:
+        required: false
+        type: string
+        default: ""
+      results-json:
+        required: false
+        type: string
+        default: "{}"
+      overall-result:
+        required: false
+        type: string
+        default: ""
 
 jobs:
   summary:
@@ -45,7 +57,48 @@ jobs:
           SYSTEM2_RESULT: ${{ inputs.system2-result }}
           SYSTEM3_NAME: ${{ inputs.system3-name }}
           SYSTEM3_RESULT: ${{ inputs.system3-result }}
+          SYSTEMS_JSON_INPUT: ${{ inputs.systems-json }}
+          RESULTS_JSON_INPUT: ${{ inputs.results-json }}
+          OVERALL_RESULT: ${{ inputs.overall-result }}
         run: |
+          if [ -n "${SYSTEMS_JSON_INPUT}" ]; then
+            if ! echo "${SYSTEMS_JSON_INPUT}" | jq -e . >/dev/null 2>&1; then
+              echo "❌ Invalid systems-json provided to pipeline-summary."
+              exit 1
+            fi
+
+            if ! echo "${RESULTS_JSON_INPUT}" | jq -e . >/dev/null 2>&1; then
+              RESULTS_JSON_INPUT='{}'
+            fi
+
+            echo "╔══════════════════════════════════════════════════════╗"
+            echo "║          MASTER PIPELINE SUMMARY                     ║"
+            echo "╠══════════════════════════════════════════════════════╣"
+            echo "║ Repository: ${{ github.repository }}"
+            echo "║ Branch:     ${{ github.ref_name }}"
+            echo "║ Commit:     ${{ github.sha }}"
+            echo "║ Actor:      ${{ github.actor }}"
+            echo "║ Timestamp:  $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "╠══════════════════════════════════════════════════════╣"
+
+            echo "${SYSTEMS_JSON_INPUT}" | jq -r --argjson results "${RESULTS_JSON_INPUT}" '.[] | "║ " + .name + ":   " + ($results[.name] // "unknown")'
+            echo "╚══════════════════════════════════════════════════════╝"
+
+            if [ -n "${OVERALL_RESULT}" ] && [ "${OVERALL_RESULT}" != "success" ] && [ "${OVERALL_RESULT}" != "skipped" ]; then
+              echo "❌ Pipeline reported overall result: ${OVERALL_RESULT}"
+              exit 1
+            fi
+
+            FAILED=$(echo "${SYSTEMS_JSON_INPUT}" | jq -r --argjson results "${RESULTS_JSON_INPUT}" '[.[] | ($results[.name] // "unknown") == "failure"] | any')
+            if [ "${FAILED}" = "true" ]; then
+              echo "❌ One or more pipelines failed!"
+              exit 1
+            fi
+
+            echo "✅ All pipelines completed successfully!"
+            exit 0
+          fi
+
           if [ "${KIND}" = "single" ]; then
             echo "Repository: ${{ github.repository }}"
             echo "Branch:     ${{ github.ref_name }}"

@@ -39,6 +39,18 @@ on:
         required: false
         type: string
         default: ""
+      systems-json:
+        required: false
+        type: string
+        default: ""
+      deployment-urls-json:
+        required: false
+        type: string
+        default: "{}"
+      results-json:
+        required: false
+        type: string
+        default: "{}"
       dry-run:
         required: false
         type: boolean
@@ -93,6 +105,9 @@ jobs:
           SYSTEM1_RESULT: ${{ inputs.system1-result }}
           SYSTEM2_RESULT: ${{ inputs.system2-result }}
           SYSTEM3_RESULT: ${{ inputs.system3-result }}
+          SYSTEMS_JSON_INPUT: ${{ inputs.systems-json }}
+          DEPLOYMENT_URLS_JSON_INPUT: ${{ inputs.deployment-urls-json }}
+          RESULTS_JSON_INPUT: ${{ inputs.results-json }}
           VERSION_TAG_INPUT: ${{ inputs.version-tag }}
           DRY_RUN: ${{ inputs.dry-run }}
         run: |
@@ -147,47 +162,72 @@ jobs:
 
           EXISTING_PR=$(gh pr list --base "${TARGET_BRANCH}" --head "${SOURCE_BRANCH}" --state open --json number --jq '.[0].number' 2>/dev/null || true)
 
-          CHECKLIST="- [ ] Verified ${SYSTEM1_NAME} on ${CONTEXT_LABEL}"
-          ROWS="| ${SYSTEM1_NAME} | ${SYSTEM1_URL:-Not deployed (no changes)} |"
-
-          if [ -n "${SYSTEM2_NAME}" ]; then
-            CHECKLIST="${CHECKLIST}\n- [ ] Verified ${SYSTEM2_NAME} on ${CONTEXT_LABEL}"
-            ROWS="${ROWS}\n| ${SYSTEM2_NAME} | ${SYSTEM2_URL:-Not deployed (no changes)} |"
-          fi
-
-          if [ -n "${SYSTEM3_NAME}" ]; then
-            CHECKLIST="${CHECKLIST}\n- [ ] Verified ${SYSTEM3_NAME} on ${CONTEXT_LABEL}"
-            ROWS="${ROWS}\n| ${SYSTEM3_NAME} | ${SYSTEM3_URL:-Not deployed (no changes)} |"
-          fi
-
-          if [ "${DIRECTION}" = "test-to-uat" ]; then
-            CHECKLIST="${CHECKLIST}\n- [ ] Ready for UAT validation"
+          if [ -n "${SYSTEMS_JSON_INPUT}" ]; then
+            SYSTEMS_JSON="${SYSTEMS_JSON_INPUT}"
           else
-            CHECKLIST="${CHECKLIST}\n- [ ] All acceptance criteria met"
+            SYSTEMS_JSON=$(jq -nc \
+              --arg n1 "${SYSTEM1_NAME}" \
+              --arg n2 "${SYSTEM2_NAME}" \
+              --arg n3 "${SYSTEM3_NAME}" \
+              '[
+                {name:$n1},
+                {name:$n2},
+                {name:$n3}
+              ] | map(select(.name != ""))')
           fi
 
-          AVAILABLE_LINKS=0
-          [ -n "${SYSTEM1_URL}" ] && AVAILABLE_LINKS=$((AVAILABLE_LINKS + 1))
-          [ -n "${SYSTEM2_NAME}" ] && [ -n "${SYSTEM2_URL}" ] && AVAILABLE_LINKS=$((AVAILABLE_LINKS + 1))
-          [ -n "${SYSTEM3_NAME}" ] && [ -n "${SYSTEM3_URL}" ] && AVAILABLE_LINKS=$((AVAILABLE_LINKS + 1))
+          if ! echo "${SYSTEMS_JSON}" | jq -e . >/dev/null 2>&1; then
+            echo "❌ Invalid systems-json payload."
+            exit 1
+          fi
 
-          EVIDENCE_ROWS="| CI — ${SYSTEM1_NAME} | ${SYSTEM1_RESULT:-unknown} |"
-          if [ -n "${SYSTEM2_NAME}" ]; then
-            EVIDENCE_ROWS="${EVIDENCE_ROWS}\n| CI — ${SYSTEM2_NAME} | ${SYSTEM2_RESULT:-unknown} |"
+          if [ "$(echo "${SYSTEMS_JSON}" | jq 'length')" -eq 0 ]; then
+            echo "❌ No systems provided for promotion PR body."
+            exit 1
           fi
-          if [ -n "${SYSTEM3_NAME}" ]; then
-            EVIDENCE_ROWS="${EVIDENCE_ROWS}\n| CI — ${SYSTEM3_NAME} | ${SYSTEM3_RESULT:-unknown} |"
+
+          if [ -n "${DEPLOYMENT_URLS_JSON_INPUT}" ] && echo "${DEPLOYMENT_URLS_JSON_INPUT}" | jq -e . >/dev/null 2>&1; then
+            DEPLOYMENT_URLS_JSON="${DEPLOYMENT_URLS_JSON_INPUT}"
+          else
+            DEPLOYMENT_URLS_JSON=$(jq -nc \
+              --arg n1 "${SYSTEM1_NAME}" --arg u1 "${SYSTEM1_URL}" \
+              --arg n2 "${SYSTEM2_NAME}" --arg u2 "${SYSTEM2_URL}" \
+              --arg n3 "${SYSTEM3_NAME}" --arg u3 "${SYSTEM3_URL}" \
+              '{($n1):$u1, ($n2):$u2, ($n3):$u3}')
           fi
-          EVIDENCE_ROWS="${EVIDENCE_ROWS}\n| Deployment Links | ${AVAILABLE_LINKS} available |"
+
+          if [ -n "${RESULTS_JSON_INPUT}" ] && echo "${RESULTS_JSON_INPUT}" | jq -e . >/dev/null 2>&1; then
+            RESULTS_JSON="${RESULTS_JSON_INPUT}"
+          else
+            RESULTS_JSON=$(jq -nc \
+              --arg n1 "${SYSTEM1_NAME}" --arg r1 "${SYSTEM1_RESULT}" \
+              --arg n2 "${SYSTEM2_NAME}" --arg r2 "${SYSTEM2_RESULT}" \
+              --arg n3 "${SYSTEM3_NAME}" --arg r3 "${SYSTEM3_RESULT}" \
+              '{($n1):$r1, ($n2):$r2, ($n3):$r3}')
+          fi
+
+          CHECKLIST=$(echo "${SYSTEMS_JSON}" | jq -r --arg label "${CONTEXT_LABEL}" 'map("- [ ] Verified \(.name) on \($label)") | join("\n")')
+          ROWS=$(echo "${SYSTEMS_JSON}" | jq -r --argjson urls "${DEPLOYMENT_URLS_JSON}" '.[] | "| \(.name) | " + (($urls[.name] // "Not deployed (no changes)")) + " |"')
+
           if [ "${DIRECTION}" = "test-to-uat" ]; then
-            EVIDENCE_ROWS="${EVIDENCE_ROWS}\n| Version Tag | ${VERSION_TAG} |"
+            CHECKLIST+=$'\n- [ ] Ready for UAT validation'
+          else
+            CHECKLIST+=$'\n- [ ] All acceptance criteria met'
           fi
 
-          DETAILS="- **Source branch:** ${SOURCE_BRANCH}\n- **Target branch:** ${TARGET_BRANCH}"
+          AVAILABLE_LINKS=$(echo "${SYSTEMS_JSON}" | jq -r --argjson urls "${DEPLOYMENT_URLS_JSON}" '[.[] | select((($urls[.name] // "") | length) > 0)] | length')
+
+          EVIDENCE_ROWS=$(echo "${SYSTEMS_JSON}" | jq -r --argjson results "${RESULTS_JSON}" '.[] | "| CI — \(.name) | " + (($results[.name] // "unknown")) + " |"')
+          EVIDENCE_ROWS=$(printf "%s\n| Deployment Links | %s available |" "${EVIDENCE_ROWS}" "${AVAILABLE_LINKS}")
           if [ "${DIRECTION}" = "test-to-uat" ]; then
-            DETAILS="${DETAILS}\n- **Version tag:** \`${VERSION_TAG}\`"
+            EVIDENCE_ROWS=$(printf "%s\n| Version Tag | %s |" "${EVIDENCE_ROWS}" "${VERSION_TAG}")
           fi
-          DETAILS="${DETAILS}\n- **Commit:** \`${SHORT_SHA}\`\n- **Compare:** [View changes](${COMPARE_URL})\n- **Triggered at:** ${TIMESTAMP}\n- **Pipeline run:** [View workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+
+          DETAILS=$(printf -- "- **Source branch:** %s\n- **Target branch:** %s" "${SOURCE_BRANCH}" "${TARGET_BRANCH}")
+          if [ "${DIRECTION}" = "test-to-uat" ]; then
+            DETAILS=$(printf "%s\n- **Version tag:** \`%s\`" "${DETAILS}" "${VERSION_TAG}")
+          fi
+          DETAILS=$(printf "%s\n- **Commit:** \`%s\`\n- **Compare:** [View changes](%s)\n- **Triggered at:** %s\n- **Pipeline run:** [View workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" "${DETAILS}" "${SHORT_SHA}" "${COMPARE_URL}" "${TIMESTAMP}")
 
           PR_BODY=$(cat <<ENDOFBODY
           ${HEADER}

@@ -17,6 +17,7 @@ Monorepo for the TriniThrive platform frontend applications — **BayaniHub**, *
 - [Repository Structure](#repository-structure)
 - [Branch Strategy](#branch-strategy)
 - [CI/CD Pipeline](#cicd-pipeline)
+- [Pipeline Setup (FE Single & FE Multi)](#pipeline-setup-fe-single--fe-multi)
 - [Vercel Deployment Setup](#vercel-deployment-setup)
 - [GitHub Secrets Reference](#github-secrets-reference)
 - [SonarCloud Setup](#sonarcloud-setup)
@@ -195,6 +196,86 @@ The pipeline is defined in `.github/workflows/master-pipeline.yml` and runs on e
 │  PR Promotion: test → uat (PR) | uat → main (PR)               │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Pipeline Setup (FE Single & FE Multi)
+
+This repository supports two master orchestrators:
+
+- FE Single: `.github/workflows/master-pipeline-fe-single.yml`
+- FE Multi: `.github/workflows/master-pipeline-fe-multi.yml`
+
+### FE Single Setup
+
+Required repository secrets:
+
+- `VERCEL_TOKEN`
+- `VERCEL_ORG_ID`
+- Secret referenced by `FE_SINGLE_VERCEL_PROJECT_SECRET` (for example `VERCEL_PROJECT_ID_FE_SINGLE`)
+
+Recommended repository variables:
+
+- `FE_SINGLE_SYSTEM_NAME` (default: `Frontend-Root`)
+- `FE_SINGLE_WORKING_DIR` (default: `.`)
+- `FE_SINGLE_IMAGE_NAME` (default: `fe-single-web`)
+- `FE_SINGLE_VERCEL_PROJECT_SECRET` (required)
+- `FE_SINGLE_PR_TOKEN_SECRET` (default: `GH_PR_TOKEN`)
+
+Optional notification secrets:
+
+- `DISCORD_WEBHOOK_URL`
+- `SLACK_WEBHOOK_URL`
+
+### FE Multi Setup (JSON Systems)
+
+FE Multi now supports a dynamic systems list through repository variable:
+
+- `FE_MULTI_SYSTEMS_JSON`
+
+Expected JSON format:
+
+```json
+[
+   {
+      "name": "BayaniHub-Web",
+      "dir": "BayaniHub-Web",
+      "image": "bayanihub-web",
+      "vercel_project_secret": "VERCEL_PROJECT_ID_BAYANIHUB_WEB"
+   },
+   {
+      "name": "DAMAYAN-Web",
+      "dir": "DAMAYAN-Web",
+      "image": "damayan-web",
+      "vercel_project_secret": "VERCEL_PROJECT_ID_DAMAYAN_WEB"
+   },
+   {
+      "name": "HopeCard-Web",
+      "dir": "HopeCard-Web",
+      "image": "hopecard-web",
+      "vercel_project_secret": "VERCEL_PROJECT_ID_HOPECARD_WEB"
+   }
+]
+```
+
+Required shared secrets:
+
+- `VERCEL_TOKEN`
+- `VERCEL_ORG_ID`
+- Per-app Vercel project ID secrets referenced by each system entry's `vercel_project_secret`
+
+PR token resolution for FE Multi:
+
+- Primary: secret named by `FE_MULTI_PR_TOKEN_SECRET` (default variable value: `GH_PR_TOKEN`)
+- Fallbacks: `GH_PR_TOKEN`, then `GHPR_TOKEN`
+
+### Manual Operations (`workflow_dispatch`)
+
+Both FE Single and FE Multi support manual trigger inputs:
+
+- `run_deploy` — run deploy jobs
+- `run_promotion` — run PR promotion jobs
+- `dry_run` — skip deploy/tag push and print PR body preview
 
 ---
 
