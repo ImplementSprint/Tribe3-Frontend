@@ -92,7 +92,8 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
           cache: "npm"
-          cache-dependency-path: ${{ inputs.system-dir }}/package-lock.json
+          cache-dependency-path: |
+            **/package-lock.json
 
       - name: Install Dependencies
         run: npm ci
