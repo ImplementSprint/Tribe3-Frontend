@@ -14,7 +14,7 @@ on:
       system-dir:
         required: true
         type: string
-        description: "System that triggered notification"
+        description: "System name or comma-separated system names"
       pipeline-type:
         required: false
         type: string
@@ -35,6 +35,9 @@ jobs:
   notify:
     name: "Send Notification"
     runs-on: ubuntu-latest
+    env:
+      HAS_SLACK: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+      HAS_DISCORD: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
     steps:
       - name: Prepare Notification
         id: prepare
@@ -58,7 +61,7 @@ jobs:
           echo "title=$TITLE" >> $GITHUB_OUTPUT
 
           echo "$EMOJI $TITLE"
-          echo "  System:   ${{ inputs.system-dir }}"
+          echo "  Systems:  ${{ inputs.system-dir }}"
           echo "  Pipeline: ${{ inputs.pipeline-type }}"
           echo "  Branch:   ${{ github.ref_name }}"
           echo "  Commit:   ${{ github.sha }}"
@@ -66,9 +69,8 @@ jobs:
           echo "  Run URL:  ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
       - name: Notify Slack
-        if: ${{ env.HAS_SLACK == 'true' }}
+        if: env.HAS_SLACK == 'true'
         env:
-          HAS_SLACK: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           curl -X POST "$SLACK_WEBHOOK_URL" \
@@ -88,9 +90,8 @@ jobs:
             }"
 
       - name: Notify Discord
-        if: ${{ env.HAS_DISCORD == 'true' }}
+        if: env.HAS_DISCORD == 'true'
         env:
-          HAS_DISCORD: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           curl -X POST "$DISCORD_WEBHOOK_URL" \
@@ -102,3 +103,4 @@ jobs:
                 \"url\": \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"
               }]
             }"
+
