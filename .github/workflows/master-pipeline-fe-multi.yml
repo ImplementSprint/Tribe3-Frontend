@@ -22,7 +22,7 @@
 # ║  Only 2 manual steps: (1) PR to test, (2) prod gate approval   ║
 # ║  All 3 systems run in PARALLEL at every stage.                 ║
 # ╚══════════════════════════════════════════════════════════════════╝
-name: "Master Pipeline Orchestrator - FE Multi"
+name: "Master Pipeline Orchestrator"
 
 on:
   push:
@@ -37,18 +37,17 @@ permissions:
 
 # Optional secret for orgs that block GITHUB_TOKEN PR creation:
 # GH_PR_TOKEN (preferred) or GHPR_TOKEN (legacy)
-# (can be defined at organization or repository level)
 #
 # Optional repository variables for reuse/customization:
-# FE_MULTI_APP1_DIR (default: system-1)
-# FE_MULTI_APP2_DIR (default: system-2)
-# FE_MULTI_APP3_DIR (default: system-3)
-# FE_MULTI_APP1_NAME (default: system-1)
-# FE_MULTI_APP2_NAME (default: system-2)
-# FE_MULTI_APP3_NAME (default: system-3)
-# FE_MULTI_APP1_IMAGE (default: system-1-web)
-# FE_MULTI_APP2_IMAGE (default: system-2-web)
-# FE_MULTI_APP3_IMAGE (default: system-3-web)
+# FE_MULTI_APP1_DIR (default: BayaniHub-Web)
+# FE_MULTI_APP2_DIR (default: DAMAYAN-Web)
+# FE_MULTI_APP3_DIR (default: HopeCard-Web)
+# FE_MULTI_APP1_NAME (default: BayaniHub-Web)
+# FE_MULTI_APP2_NAME (default: DAMAYAN-Web)
+# FE_MULTI_APP3_NAME (default: HopeCard-Web)
+# FE_MULTI_APP1_IMAGE (default: bayanihub-web)
+# FE_MULTI_APP2_IMAGE (default: damayan-web)
+# FE_MULTI_APP3_IMAGE (default: hopecard-web)
 # FE_MULTI_APP1_VERCEL_PROJECT_SECRET (required, no default)
 # FE_MULTI_APP2_VERCEL_PROJECT_SECRET (required, no default)
 # FE_MULTI_APP3_VERCEL_PROJECT_SECRET (required, no default)
@@ -81,11 +80,11 @@ jobs:
         with:
           filters: |
             bayanihub-web:
-              - '${{ vars.FE_MULTI_APP1_DIR != '' && vars.FE_MULTI_APP1_DIR || 'system-1' }}/**'
+              - '${{ vars.FE_MULTI_APP1_DIR != '' && vars.FE_MULTI_APP1_DIR || 'BayaniHub-Web' }}/**'
             damayan-web:
-              - '${{ vars.FE_MULTI_APP2_DIR != '' && vars.FE_MULTI_APP2_DIR || 'system-2' }}/**'
+              - '${{ vars.FE_MULTI_APP2_DIR != '' && vars.FE_MULTI_APP2_DIR || 'DAMAYAN-Web' }}/**'
             hopecard-web:
-              - '${{ vars.FE_MULTI_APP3_DIR != '' && vars.FE_MULTI_APP3_DIR || 'system-3' }}/**'
+              - '${{ vars.FE_MULTI_APP3_DIR != '' && vars.FE_MULTI_APP3_DIR || 'HopeCard-Web' }}/**'
             shared:
               - '.github/**'
               - 'package.json'
@@ -113,35 +112,35 @@ jobs:
   # ║  Each only runs if its files changed (or shared files)      ║
   # ╚══════════════════════════════════════════════════════════════╝
   bayanihub-web:
-    name: "${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'system-1' }} Pipeline"
+    name: "${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'BayaniHub-Web' }} Pipeline"
     needs: [detect-changes]
     if: needs.detect-changes.outputs.bayanihub-web == 'true' || needs.detect-changes.outputs.shared == 'true'
     uses: ./.github/workflows/front-end-workflow.yml
     with:
-      system-dir: ${{ vars.FE_MULTI_APP1_DIR != '' && vars.FE_MULTI_APP1_DIR || 'system-1' }}
-      system-name: ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'system-1' }}
+      system-dir: ${{ vars.FE_MULTI_APP1_DIR != '' && vars.FE_MULTI_APP1_DIR || 'BayaniHub-Web' }}
+      system-name: ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'BayaniHub-Web' }}
       enable-security-scan: true
     secrets: inherit
 
   damayan-web:
-    name: "${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'system-2' }} Pipeline"
+    name: "${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'DAMAYAN-Web' }} Pipeline"
     needs: [detect-changes]
     if: needs.detect-changes.outputs.damayan-web == 'true' || needs.detect-changes.outputs.shared == 'true'
     uses: ./.github/workflows/front-end-workflow.yml
     with:
-      system-dir: ${{ vars.FE_MULTI_APP2_DIR != '' && vars.FE_MULTI_APP2_DIR || 'system-2' }}
-      system-name: ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'system-2' }}
+      system-dir: ${{ vars.FE_MULTI_APP2_DIR != '' && vars.FE_MULTI_APP2_DIR || 'DAMAYAN-Web' }}
+      system-name: ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'DAMAYAN-Web' }}
       enable-security-scan: true
     secrets: inherit
 
   hopecard-web:
-    name: "${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'system-3' }} Pipeline"
+    name: "${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'HopeCard-Web' }} Pipeline"
     needs: [detect-changes]
     if: needs.detect-changes.outputs.hopecard-web == 'true' || needs.detect-changes.outputs.shared == 'true'
     uses: ./.github/workflows/front-end-workflow.yml
     with:
-      system-dir: ${{ vars.FE_MULTI_APP3_DIR != '' && vars.FE_MULTI_APP3_DIR || 'system-3' }}
-      system-name: ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'system-3' }}
+      system-dir: ${{ vars.FE_MULTI_APP3_DIR != '' && vars.FE_MULTI_APP3_DIR || 'HopeCard-Web' }}
+      system-name: ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'HopeCard-Web' }}
       enable-security-scan: true
     secrets: inherit
 
@@ -206,13 +205,9 @@ jobs:
   # ╚══════════════════════════════════════════════════════════════╝
   version-test:
     name: "Version Tag — TEST"
-    needs: [bayanihub-web, damayan-web, hopecard-web]
     if: >-
       always() &&
-      github.ref == 'refs/heads/test' && github.event_name == 'push' &&
-      (needs.bayanihub-web.result == 'success' || needs.bayanihub-web.result == 'skipped') &&
-      (needs.damayan-web.result == 'success' || needs.damayan-web.result == 'skipped') &&
-      (needs.hopecard-web.result == 'success' || needs.hopecard-web.result == 'skipped')
+      github.ref == 'refs/heads/test' && github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
       version_tag: ${{ steps.version.outputs.tag }}
@@ -226,18 +221,8 @@ jobs:
       - name: Create and Push Version Tag
         id: version
         run: |
-          PREFIX="test-v"
-          LATEST=$(git tag -l "${PREFIX}[0-9]*.[0-9]*.[0-9]*.[0-9]*" --sort=-v:refname | head -n 1)
-
-          if [ -z "${LATEST}" ]; then
-            NEXT_VERSION="1.0.0.0"
-          else
-            RAW_VERSION="${LATEST#${PREFIX}}"
-            IFS='.' read -r MAJOR MINOR PATCH BUILD <<< "${RAW_VERSION}"
-            NEXT_VERSION="${MAJOR}.${MINOR}.${PATCH}.$((BUILD + 1))"
-          fi
-
-          TAG="${PREFIX}${NEXT_VERSION}"
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          TAG="test-v$(date -u +%Y.%m.%d).${GITHUB_RUN_NUMBER}-${SHORT_SHA}"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -259,7 +244,7 @@ jobs:
   # ║  Uses VERCEL_PROJECT_ID_* secrets per sub-project           ║
   # ╚══════════════════════════════════════════════════════════════╝
   deploy-test-bayanihub:
-    name: "TEST — ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'system-1' }}"
+    name: "TEST — ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'BayaniHub-Web' }}"
     needs: [bayanihub-web, validate-vercel-secret-vars]
     if: |
       always() &&
@@ -267,7 +252,7 @@ jobs:
       needs.bayanihub-web.result == 'success'
     uses: ./.github/workflows/vercel-deploy.yml
     with:
-      working-directory: ${{ vars.FE_MULTI_APP1_DIR != '' && vars.FE_MULTI_APP1_DIR || 'system-1' }}
+      working-directory: ${{ vars.FE_MULTI_APP1_DIR != '' && vars.FE_MULTI_APP1_DIR || 'BayaniHub-Web' }}
       environment: preview
     secrets:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -275,7 +260,7 @@ jobs:
       VERCEL_PROJECT_ID: ${{ secrets[vars.FE_MULTI_APP1_VERCEL_PROJECT_SECRET] }}
 
   deploy-test-damayan:
-    name: "TEST — ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'system-2' }}"
+    name: "TEST — ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'DAMAYAN-Web' }}"
     needs: [damayan-web, validate-vercel-secret-vars]
     if: |
       always() &&
@@ -283,7 +268,7 @@ jobs:
       needs.damayan-web.result == 'success'
     uses: ./.github/workflows/vercel-deploy.yml
     with:
-      working-directory: ${{ vars.FE_MULTI_APP2_DIR != '' && vars.FE_MULTI_APP2_DIR || 'system-2' }}
+      working-directory: ${{ vars.FE_MULTI_APP2_DIR != '' && vars.FE_MULTI_APP2_DIR || 'DAMAYAN-Web' }}
       environment: preview
     secrets:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -291,7 +276,7 @@ jobs:
       VERCEL_PROJECT_ID: ${{ secrets[vars.FE_MULTI_APP2_VERCEL_PROJECT_SECRET] }}
 
   deploy-test-hopecard:
-    name: "TEST — ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'system-3' }}"
+    name: "TEST — ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'HopeCard-Web' }}"
     needs: [hopecard-web, validate-vercel-secret-vars]
     if: |
       always() &&
@@ -299,7 +284,7 @@ jobs:
       needs.hopecard-web.result == 'success'
     uses: ./.github/workflows/vercel-deploy.yml
     with:
-      working-directory: ${{ vars.FE_MULTI_APP3_DIR != '' && vars.FE_MULTI_APP3_DIR || 'system-3' }}
+      working-directory: ${{ vars.FE_MULTI_APP3_DIR != '' && vars.FE_MULTI_APP3_DIR || 'HopeCard-Web' }}
       environment: preview
     secrets:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -311,7 +296,7 @@ jobs:
   # ║  Uses VERCEL_PROJECT_ID_* secrets per sub-project           ║
   # ╚══════════════════════════════════════════════════════════════╝
   deploy-uat-bayanihub:
-    name: "UAT — ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'system-1' }}"
+    name: "UAT — ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'BayaniHub-Web' }}"
     needs: [bayanihub-web, validate-vercel-secret-vars]
     if: |
       always() &&
@@ -319,7 +304,7 @@ jobs:
       needs.bayanihub-web.result == 'success'
     uses: ./.github/workflows/vercel-deploy.yml
     with:
-      working-directory: ${{ vars.FE_MULTI_APP1_DIR != '' && vars.FE_MULTI_APP1_DIR || 'system-1' }}
+      working-directory: ${{ vars.FE_MULTI_APP1_DIR != '' && vars.FE_MULTI_APP1_DIR || 'BayaniHub-Web' }}
       environment: preview
     secrets:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -327,7 +312,7 @@ jobs:
       VERCEL_PROJECT_ID: ${{ secrets[vars.FE_MULTI_APP1_VERCEL_PROJECT_SECRET] }}
 
   deploy-uat-damayan:
-    name: "UAT — ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'system-2' }}"
+    name: "UAT — ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'DAMAYAN-Web' }}"
     needs: [damayan-web, validate-vercel-secret-vars]
     if: |
       always() &&
@@ -335,7 +320,7 @@ jobs:
       needs.damayan-web.result == 'success'
     uses: ./.github/workflows/vercel-deploy.yml
     with:
-      working-directory: ${{ vars.FE_MULTI_APP2_DIR != '' && vars.FE_MULTI_APP2_DIR || 'system-2' }}
+      working-directory: ${{ vars.FE_MULTI_APP2_DIR != '' && vars.FE_MULTI_APP2_DIR || 'DAMAYAN-Web' }}
       environment: preview
     secrets:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -343,7 +328,7 @@ jobs:
       VERCEL_PROJECT_ID: ${{ secrets[vars.FE_MULTI_APP2_VERCEL_PROJECT_SECRET] }}
 
   deploy-uat-hopecard:
-    name: "UAT — ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'system-3' }}"
+    name: "UAT — ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'HopeCard-Web' }}"
     needs: [hopecard-web, validate-vercel-secret-vars]
     if: |
       always() &&
@@ -351,45 +336,12 @@ jobs:
       needs.hopecard-web.result == 'success'
     uses: ./.github/workflows/vercel-deploy.yml
     with:
-      working-directory: ${{ vars.FE_MULTI_APP3_DIR != '' && vars.FE_MULTI_APP3_DIR || 'system-3' }}
+      working-directory: ${{ vars.FE_MULTI_APP3_DIR != '' && vars.FE_MULTI_APP3_DIR || 'HopeCard-Web' }}
       environment: preview
     secrets:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets[vars.FE_MULTI_APP3_VERCEL_PROJECT_SECRET] }}
-
-  version-uat:
-    name: "Version Tag — UAT"
-    needs: [bayanihub-web, damayan-web, hopecard-web]
-    if: >-
-      always() &&
-      github.ref == 'refs/heads/uat' && github.event_name == 'push' &&
-      (needs.bayanihub-web.result == 'success' || needs.bayanihub-web.result == 'skipped') &&
-      (needs.damayan-web.result == 'success' || needs.damayan-web.result == 'skipped') &&
-      (needs.hopecard-web.result == 'success' || needs.hopecard-web.result == 'skipped')
-    runs-on: ubuntu-latest
-    outputs:
-      version_tag: ${{ steps.version.outputs.tag }}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Resolve Latest TEST Version Tag
-        id: version
-        run: |
-          PREFIX="test-v"
-          LATEST=$(git tag -l "${PREFIX}[0-9]*.[0-9]*.[0-9]*.[0-9]*" --sort=-v:refname | head -n 1)
-
-          if [ -z "${LATEST}" ]; then
-            echo "❌ No test version tag found. UAT version reference requires a prior test tag."
-            exit 1
-          fi
-
-          echo "tag=${LATEST}" >> $GITHUB_OUTPUT
-          echo "✅ Resolved UAT reference tag: ${LATEST}"
 
   # ╔══════════════════════════════════════════════════════════════╗
   # ║  STAGE 4 — Deploy to Prod via Vercel (main branch only)    ║
@@ -416,12 +368,12 @@ jobs:
 
   # ── Step 3B: Deploy to Prod via Vercel (after gate) ────────────
   deploy-prod-bayanihub:
-    name: "Prod — ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'system-1' }}"
+    name: "Prod — ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'BayaniHub-Web' }}"
     needs: [production-gate, validate-vercel-secret-vars]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     uses: ./.github/workflows/vercel-deploy.yml
     with:
-      working-directory: ${{ vars.FE_MULTI_APP1_DIR != '' && vars.FE_MULTI_APP1_DIR || 'system-1' }}
+      working-directory: ${{ vars.FE_MULTI_APP1_DIR != '' && vars.FE_MULTI_APP1_DIR || 'BayaniHub-Web' }}
       environment: production
     secrets:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -429,12 +381,12 @@ jobs:
       VERCEL_PROJECT_ID: ${{ secrets[vars.FE_MULTI_APP1_VERCEL_PROJECT_SECRET] }}
 
   deploy-prod-damayan:
-    name: "Prod — ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'system-2' }}"
+    name: "Prod — ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'DAMAYAN-Web' }}"
     needs: [production-gate, validate-vercel-secret-vars]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     uses: ./.github/workflows/vercel-deploy.yml
     with:
-      working-directory: ${{ vars.FE_MULTI_APP2_DIR != '' && vars.FE_MULTI_APP2_DIR || 'system-2' }}
+      working-directory: ${{ vars.FE_MULTI_APP2_DIR != '' && vars.FE_MULTI_APP2_DIR || 'DAMAYAN-Web' }}
       environment: production
     secrets:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -442,12 +394,12 @@ jobs:
       VERCEL_PROJECT_ID: ${{ secrets[vars.FE_MULTI_APP2_VERCEL_PROJECT_SECRET] }}
 
   deploy-prod-hopecard:
-    name: "Prod — ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'system-3' }}"
+    name: "Prod — ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'HopeCard-Web' }}"
     needs: [production-gate, validate-vercel-secret-vars]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     uses: ./.github/workflows/vercel-deploy.yml
     with:
-      working-directory: ${{ vars.FE_MULTI_APP3_DIR != '' && vars.FE_MULTI_APP3_DIR || 'system-3' }}
+      working-directory: ${{ vars.FE_MULTI_APP3_DIR != '' && vars.FE_MULTI_APP3_DIR || 'HopeCard-Web' }}
       environment: production
     secrets:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -477,17 +429,8 @@ jobs:
       - name: Create and Push Release Tag
         id: version
         run: |
-          TEST_PREFIX="test-v"
-          MAIN_PREFIX="main-v"
-
-          LATEST_TEST=$(git tag -l "${TEST_PREFIX}[0-9]*.[0-9]*.[0-9]*.[0-9]*" --sort=-v:refname | head -n 1)
-          if [ -z "${LATEST_TEST}" ]; then
-            echo "❌ No test version tag found. main release tag requires a prior test tag."
-            exit 1
-          fi
-
-          VERSION_FROM_TEST="${LATEST_TEST#${TEST_PREFIX}}"
-          TAG="${MAIN_PREFIX}${VERSION_FROM_TEST}"
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          TAG="main-v$(date -u +%Y.%m.%d).${GITHUB_RUN_NUMBER}-${SHORT_SHA}"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -509,39 +452,39 @@ jobs:
   # ║  One image per frontend app                                 ║
   # ╚══════════════════════════════════════════════════════════════╝
   docker-main-bayanihub:
-    name: "GHCR — ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'system-1' }}"
+    name: "GHCR — ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'BayaniHub-Web' }}"
     needs: [version-main-release]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     uses: ./.github/workflows/docker-build.yml
     with:
-      working-directory: ${{ vars.FE_MULTI_APP1_DIR != '' && vars.FE_MULTI_APP1_DIR || 'system-1' }}
-      image-name: ${{ vars.FE_MULTI_APP1_IMAGE != '' && vars.FE_MULTI_APP1_IMAGE || 'system-1-web' }}
+      working-directory: ${{ vars.FE_MULTI_APP1_DIR != '' && vars.FE_MULTI_APP1_DIR || 'BayaniHub-Web' }}
+      image-name: ${{ vars.FE_MULTI_APP1_IMAGE != '' && vars.FE_MULTI_APP1_IMAGE || 'bayanihub-web' }}
       release-tag: ${{ needs.version-main-release.outputs.version_tag }}
       push-image: true
       scan-vulnerabilities: true
     secrets: inherit
 
   docker-main-damayan:
-    name: "GHCR — ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'system-2' }}"
+    name: "GHCR — ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'DAMAYAN-Web' }}"
     needs: [version-main-release]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     uses: ./.github/workflows/docker-build.yml
     with:
-      working-directory: ${{ vars.FE_MULTI_APP2_DIR != '' && vars.FE_MULTI_APP2_DIR || 'system-2' }}
-      image-name: ${{ vars.FE_MULTI_APP2_IMAGE != '' && vars.FE_MULTI_APP2_IMAGE || 'system-2-web' }}
+      working-directory: ${{ vars.FE_MULTI_APP2_DIR != '' && vars.FE_MULTI_APP2_DIR || 'DAMAYAN-Web' }}
+      image-name: ${{ vars.FE_MULTI_APP2_IMAGE != '' && vars.FE_MULTI_APP2_IMAGE || 'damayan-web' }}
       release-tag: ${{ needs.version-main-release.outputs.version_tag }}
       push-image: true
       scan-vulnerabilities: true
     secrets: inherit
 
   docker-main-hopecard:
-    name: "GHCR — ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'system-3' }}"
+    name: "GHCR — ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'HopeCard-Web' }}"
     needs: [version-main-release]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     uses: ./.github/workflows/docker-build.yml
     with:
-      working-directory: ${{ vars.FE_MULTI_APP3_DIR != '' && vars.FE_MULTI_APP3_DIR || 'system-3' }}
-      image-name: ${{ vars.FE_MULTI_APP3_IMAGE != '' && vars.FE_MULTI_APP3_IMAGE || 'system-3-web' }}
+      working-directory: ${{ vars.FE_MULTI_APP3_DIR != '' && vars.FE_MULTI_APP3_DIR || 'HopeCard-Web' }}
+      image-name: ${{ vars.FE_MULTI_APP3_IMAGE != '' && vars.FE_MULTI_APP3_IMAGE || 'hopecard-web' }}
       release-tag: ${{ needs.version-main-release.outputs.version_tag }}
       push-image: true
       scan-vulnerabilities: true
@@ -575,7 +518,7 @@ jobs:
         run: |
           if [ -z "${GH_PR_TOKEN}" ]; then
             echo "❌ Missing PAT secret for PR creation."
-            echo "Add GH_PR_TOKEN as an organization or repository secret."
+            echo "Add repository secret GH_PR_TOKEN."
             echo "Required repository permissions: Pull requests (Read and write), Contents (Read-only or Read and write)."
             exit 1
           fi
@@ -589,20 +532,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_PR_TOKEN }}
         run: |
-          git fetch origin test uat --no-tags
-          COMMITS_AHEAD=$(git rev-list --count origin/uat..origin/test || echo 0)
-          if [ "${COMMITS_AHEAD}" -eq 0 ]; then
-            echo "ℹ️ No commits between test and uat. Skipping PR creation."
-            exit 0
-          fi
-
           EXISTING_PR=$(gh pr list --base uat --head test --state open --json number --jq '.[0].number' 2>/dev/null || true)
 
           BAYANIHUB_URL="${{ needs.deploy-test-bayanihub.outputs.deployment_url }}"
           DAMAYAN_URL="${{ needs.deploy-test-damayan.outputs.deployment_url }}"
           HOPECARD_URL="${{ needs.deploy-test-hopecard.outputs.deployment_url }}"
           VERSION_TAG="${{ needs.version-test.outputs.version_tag }}"
-          UAT_REFERENCE_TAG="${VERSION_TAG}"
           COMMIT_SHA="${{ github.sha }}"
           SHORT_SHA="${COMMIT_SHA:0:7}"
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
@@ -613,23 +548,17 @@ jobs:
           This PR was **automatically created** after all CI checks and TEST deployments passed on the \`test\` branch.
 
           ### 📋 Pre-merge Checklist
-          - [ ] Verified ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'system-1' }} on TEST
-          - [ ] Verified ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'system-2' }} on TEST
-          - [ ] Verified ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'system-3' }} on TEST
+          - [ ] Verified ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'BayaniHub-Web' }} on TEST
+          - [ ] Verified ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'DAMAYAN-Web' }} on TEST
+          - [ ] Verified ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'HopeCard-Web' }} on TEST
           - [ ] Ready for UAT validation
 
           ### 🔗 Vercel TEST Deployment Links
           | System | TEST Preview Link |
           |--------|-------------------|
-          | ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'system-1' }} | ${BAYANIHUB_URL:-Not deployed (no changes)} |
-          | ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'system-2' }} | ${DAMAYAN_URL:-Not deployed (no changes)} |
-          | ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'system-3' }} | ${HOPECARD_URL:-Not deployed (no changes)} |
-
-          ### 🏷️ Version References
-          | Environment | Version Tag |
-          |-------------|-------------|
-          | TEST | ${VERSION_TAG} |
-          | UAT (reference) | ${UAT_REFERENCE_TAG} |
+          | ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'BayaniHub-Web' }} | ${BAYANIHUB_URL:-Not deployed (no changes)} |
+          | ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'DAMAYAN-Web' }} | ${DAMAYAN_URL:-Not deployed (no changes)} |
+          | ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'HopeCard-Web' }} | ${HOPECARD_URL:-Not deployed (no changes)} |
 
           ### 🔍 Details
           - **Source branch:** test
@@ -661,14 +590,13 @@ jobs:
   # ── Promotion: uat → main (creates PR for manual approval) ──────
   create-pr-to-main:
     name: "Create PR → Main"
-    needs: [bayanihub-web, damayan-web, hopecard-web, version-uat, deploy-uat-bayanihub, deploy-uat-damayan, deploy-uat-hopecard]
+    needs: [bayanihub-web, damayan-web, hopecard-web, deploy-uat-bayanihub, deploy-uat-damayan, deploy-uat-hopecard]
     if: >-
       always() &&
       github.ref == 'refs/heads/uat' && github.event_name == 'push' &&
       (needs.bayanihub-web.result == 'success' || needs.bayanihub-web.result == 'skipped') &&
       (needs.damayan-web.result == 'success' || needs.damayan-web.result == 'skipped') &&
       (needs.hopecard-web.result == 'success' || needs.hopecard-web.result == 'skipped') &&
-      needs.version-uat.result == 'success' &&
       (needs.deploy-uat-bayanihub.result == 'success' || needs.deploy-uat-bayanihub.result == 'skipped') &&
       (needs.deploy-uat-damayan.result == 'success' || needs.deploy-uat-damayan.result == 'skipped') &&
       (needs.deploy-uat-hopecard.result == 'success' || needs.deploy-uat-hopecard.result == 'skipped')
@@ -680,7 +608,7 @@ jobs:
         run: |
           if [ -z "${GH_PR_TOKEN}" ]; then
             echo "❌ Missing PAT secret for PR creation."
-            echo "Add GH_PR_TOKEN as an organization or repository secret."
+            echo "Add repository secret GH_PR_TOKEN."
             echo "Required repository permissions: Pull requests (Read and write), Contents (Read-only or Read and write)."
             exit 1
           fi
@@ -694,13 +622,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_PR_TOKEN }}
         run: |
-          git fetch origin uat main --no-tags
-          COMMITS_AHEAD=$(git rev-list --count origin/main..origin/uat || echo 0)
-          if [ "${COMMITS_AHEAD}" -eq 0 ]; then
-            echo "ℹ️ No commits between uat and main. Skipping PR creation."
-            exit 0
-          fi
-
           # Check if an open PR from uat → main already exists
           EXISTING_PR=$(gh pr list --base main --head uat --state open --json number --jq '.[0].number' 2>/dev/null || true)
 
@@ -711,8 +632,6 @@ jobs:
             BAYANIHUB_URL="${{ needs.deploy-uat-bayanihub.outputs.deployment_url }}"
             DAMAYAN_URL="${{ needs.deploy-uat-damayan.outputs.deployment_url }}"
             HOPECARD_URL="${{ needs.deploy-uat-hopecard.outputs.deployment_url }}"
-            VERSION_TAG="${{ needs.version-uat.outputs.version_tag }}"
-            MAIN_REFERENCE_TAG="main-v${VERSION_TAG#test-v}"
             COMMIT_SHA="${{ github.sha }}"
             SHORT_SHA="${COMMIT_SHA:0:7}"
             TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
@@ -723,29 +642,21 @@ jobs:
           This PR was **automatically created** after all CI checks and UAT deployments passed on the \`uat\` branch.
 
           ### 📋 Pre-merge Checklist
-          - [ ] Verified ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'system-1' }} on UAT
-          - [ ] Verified ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'system-2' }} on UAT
-          - [ ] Verified ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'system-3' }} on UAT
+          - [ ] Verified ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'BayaniHub-Web' }} on UAT
+          - [ ] Verified ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'DAMAYAN-Web' }} on UAT
+          - [ ] Verified ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'HopeCard-Web' }} on UAT
           - [ ] All acceptance criteria met
 
           ### 🔗 Vercel UAT Deployment Links
           | System | UAT Preview Link |
           |--------|------------------|
-          | ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'system-1' }} | ${BAYANIHUB_URL:-Not deployed (no changes)} |
-          | ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'system-2' }} | ${DAMAYAN_URL:-Not deployed (no changes)} |
-          | ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'system-3' }} | ${HOPECARD_URL:-Not deployed (no changes)} |
-
-          ### 🏷️ Version References
-          | Environment | Version Tag |
-          |-------------|-------------|
-          | TEST (source sequence) | ${VERSION_TAG} |
-          | UAT (reference) | ${VERSION_TAG} |
-          | MAIN (target release) | ${MAIN_REFERENCE_TAG} |
+          | ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'BayaniHub-Web' }} | ${BAYANIHUB_URL:-Not deployed (no changes)} |
+          | ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'DAMAYAN-Web' }} | ${DAMAYAN_URL:-Not deployed (no changes)} |
+          | ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'HopeCard-Web' }} | ${HOPECARD_URL:-Not deployed (no changes)} |
 
           ### 🔍 Details
           - **Source branch:** uat
           - **Target branch:** main
-          - **Version tag reference:** \`${VERSION_TAG}\`
           - **Latest commit:** \`${SHORT_SHA}\`
           - **Updated at:** ${TIMESTAMP}
           - **Pipeline run:** [View workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
@@ -764,8 +675,6 @@ jobs:
           BAYANIHUB_URL="${{ needs.deploy-uat-bayanihub.outputs.deployment_url }}"
           DAMAYAN_URL="${{ needs.deploy-uat-damayan.outputs.deployment_url }}"
           HOPECARD_URL="${{ needs.deploy-uat-hopecard.outputs.deployment_url }}"
-          VERSION_TAG="${{ needs.version-uat.outputs.version_tag }}"
-          MAIN_REFERENCE_TAG="main-v${VERSION_TAG#test-v}"
           COMMIT_SHA="${{ github.sha }}"
           SHORT_SHA="${COMMIT_SHA:0:7}"
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
@@ -776,29 +685,21 @@ jobs:
           This PR was **automatically created** after all CI checks and UAT deployments passed on the \`uat\` branch.
 
           ### 📋 Pre-merge Checklist
-          - [ ] Verified ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'system-1' }} on UAT
-          - [ ] Verified ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'system-2' }} on UAT
-          - [ ] Verified ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'system-3' }} on UAT
+          - [ ] Verified ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'BayaniHub-Web' }} on UAT
+          - [ ] Verified ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'DAMAYAN-Web' }} on UAT
+          - [ ] Verified ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'HopeCard-Web' }} on UAT
           - [ ] All acceptance criteria met
 
           ### 🔗 Vercel UAT Deployment Links
           | System | UAT Preview Link |
           |--------|------------------|
-          | ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'system-1' }} | ${BAYANIHUB_URL:-Not deployed (no changes)} |
-          | ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'system-2' }} | ${DAMAYAN_URL:-Not deployed (no changes)} |
-          | ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'system-3' }} | ${HOPECARD_URL:-Not deployed (no changes)} |
-
-          ### 🏷️ Version References
-          | Environment | Version Tag |
-          |-------------|-------------|
-          | TEST (source sequence) | ${VERSION_TAG} |
-          | UAT (reference) | ${VERSION_TAG} |
-          | MAIN (target release) | ${MAIN_REFERENCE_TAG} |
+          | ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'BayaniHub-Web' }} | ${BAYANIHUB_URL:-Not deployed (no changes)} |
+          | ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'DAMAYAN-Web' }} | ${DAMAYAN_URL:-Not deployed (no changes)} |
+          | ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'HopeCard-Web' }} | ${HOPECARD_URL:-Not deployed (no changes)} |
 
           ### 🔍 Details
           - **Source branch:** uat
           - **Target branch:** main
-          - **Version tag reference:** \`${VERSION_TAG}\`
           - **Commit:** \`${SHORT_SHA}\`
           - **Triggered at:** ${TIMESTAMP}
           - **Pipeline run:** [View workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
@@ -836,9 +737,9 @@ jobs:
           echo "║ Actor:      ${{ github.actor }}"
           echo "║ Timestamp:  $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           echo "╠══════════════════════════════════════════════════════╣"
-          echo "║ ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'system-1' }}:   ${{ needs.bayanihub-web.result }}"
-          echo "║ ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'system-2' }}:     ${{ needs.damayan-web.result }}"
-          echo "║ ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'system-3' }}:    ${{ needs.hopecard-web.result }}"
+          echo "║ ${{ vars.FE_MULTI_APP1_NAME != '' && vars.FE_MULTI_APP1_NAME || 'BayaniHub-Web' }}:   ${{ needs.bayanihub-web.result }}"
+          echo "║ ${{ vars.FE_MULTI_APP2_NAME != '' && vars.FE_MULTI_APP2_NAME || 'DAMAYAN-Web' }}:     ${{ needs.damayan-web.result }}"
+          echo "║ ${{ vars.FE_MULTI_APP3_NAME != '' && vars.FE_MULTI_APP3_NAME || 'HopeCard-Web' }}:    ${{ needs.hopecard-web.result }}"
           echo "╚══════════════════════════════════════════════════════╝"
 
           FAILED=false
@@ -862,53 +763,4 @@ jobs:
           echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           # Add Slack/Discord/Email notification here
           # curl -X POST "$SLACK_WEBHOOK" -d '{"text": "Pipeline failed..."}'
-
-  auto-revert-on-failure:
-    name: "Auto Revert Failed Commit"
-    needs:
-      - bayanihub-web
-      - damayan-web
-      - hopecard-web
-      - sonarcloud
-      - version-test
-      - version-uat
-      - deploy-test-bayanihub
-      - deploy-test-damayan
-      - deploy-test-hopecard
-      - deploy-uat-bayanihub
-      - deploy-uat-damayan
-      - deploy-uat-hopecard
-      - create-pr-to-uat
-      - create-pr-to-main
-    if: >-
-      always() &&
-      github.event_name == 'push' &&
-      (github.ref == 'refs/heads/test' || github.ref == 'refs/heads/uat') &&
-      github.actor != 'github-actions[bot]' &&
-      contains(needs.*.result, 'failure')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GH_PR_TOKEN != '' && secrets.GH_PR_TOKEN || secrets.GITHUB_TOKEN }}
-
-      - name: Revert failed commit
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          TARGET_SHA="${{ github.sha }}"
-          PARENT_COUNT=$(git rev-list --parents -n 1 "${TARGET_SHA}" | awk '{print NF-1}')
-
-          if [ "${PARENT_COUNT}" -gt 1 ]; then
-            echo "ℹ️ Reverting merge commit ${TARGET_SHA} with mainline parent 1"
-            git revert -m 1 --no-edit "${TARGET_SHA}"
-          else
-            git revert --no-edit "${TARGET_SHA}"
-          fi
-
-          REVERT_MSG=$(git log -1 --pretty=%B)
-          git commit --amend -m "${REVERT_MSG}"$'\n\n[skip ci]'
-          git push origin HEAD:${{ github.ref_name }}
 
