@@ -66,37 +66,49 @@ jobs:
       - name: Install Vercel CLI
         run: npm install -g vercel@50.22.1
 
-      - name: Pull Vercel Environment
+      - name: Pull and Build with Vercel (adaptive context)
+        id: prepare
         run: |
-          vercel pull --yes --environment=${{ inputs.environment }} \
-            --token=${{ secrets.VERCEL_TOKEN }}
-        working-directory: ./${{ inputs.working-directory }}
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          set -euo pipefail
 
-      - name: Build with Vercel
-        run: |
-          if [ "${{ inputs.environment }}" = "production" ]; then
-            vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+          run_pull_build() {
+            local dir="$1"
+            echo "🔎 Trying Vercel pull/build in: $dir"
+
+            pushd "$dir" > /dev/null
+
+            vercel pull --yes --environment=${{ inputs.environment }} --token=${{ secrets.VERCEL_TOKEN }}
+
+            if [ "${{ inputs.environment }}" = "production" ]; then
+              vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+            else
+              vercel build --token=${{ secrets.VERCEL_TOKEN }}
+            fi
+
+            if [ ! -d ".vercel/output" ]; then
+              echo "❌ .vercel/output not found in $dir"
+              popd > /dev/null
+              return 1
+            fi
+
+            popd > /dev/null
+            return 0
+          }
+
+          if run_pull_build "./${{ inputs.working-directory }}"; then
+            echo "deploy_dir=./${{ inputs.working-directory }}" >> "$GITHUB_OUTPUT"
+            echo "✅ Using deploy directory: ./${{ inputs.working-directory }}"
+          elif run_pull_build "."; then
+            echo "deploy_dir=." >> "$GITHUB_OUTPUT"
+            echo "✅ Using deploy directory: ."
           else
-            vercel build --token=${{ secrets.VERCEL_TOKEN }}
-          fi
-        working-directory: ./${{ inputs.working-directory }}
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-
-      - name: Validate Vercel Build Output
-        run: |
-          if [ ! -d ".vercel/output" ]; then
-            echo "❌ .vercel/output not found after vercel build in ./${{ inputs.working-directory }}"
-            echo "This usually means Vercel Root Directory or project mapping is incorrect."
-            echo "Ensure this GitHub secret VERCEL_PROJECT_ID points to the same sub-project and Root Directory is set correctly in Vercel."
+            echo "❌ Vercel pull/build failed in both contexts."
+            echo "Check VERCEL_PROJECT_ID mapping and Root Directory in Vercel project settings."
             exit 1
           fi
-          echo "✅ Found .vercel/output"
-        working-directory: ./${{ inputs.working-directory }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
       - name: Deploy to Vercel
         id: deploy
@@ -108,7 +120,7 @@ jobs:
           fi
           echo "url=$URL" >> $GITHUB_OUTPUT
           echo "🚀 Deployed to: $URL"
-        working-directory: ./${{ inputs.working-directory }}
+        working-directory: ${{ steps.prepare.outputs.deploy_dir }}
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
