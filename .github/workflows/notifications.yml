@@ -45,20 +45,31 @@ jobs:
           if [ "${{ inputs.status }}" = "success" ]; then
             EMOJI="✅"
             COLOR="good"
+            DISCORD_COLOR="3066993"
             TITLE="Pipeline Succeeded"
           elif [ "${{ inputs.status }}" = "failure" ]; then
             EMOJI="❌"
             COLOR="danger"
+            DISCORD_COLOR="15158332"
             TITLE="Pipeline Failed"
           else
             EMOJI="⚠️"
             COLOR="warning"
+            DISCORD_COLOR="16776960"
             TITLE="Pipeline Cancelled"
+          fi
+
+          if [ "${{ inputs.status }}" = "failure" ] || [ "${{ inputs.status }}" = "cancelled" ]; then
+            MENTION="<!here>"
+          else
+            MENTION=""
           fi
 
           echo "emoji=$EMOJI" >> $GITHUB_OUTPUT
           echo "color=$COLOR" >> $GITHUB_OUTPUT
+          echo "discord_color=$DISCORD_COLOR" >> $GITHUB_OUTPUT
           echo "title=$TITLE" >> $GITHUB_OUTPUT
+          echo "mention=$MENTION" >> $GITHUB_OUTPUT
 
           echo "$EMOJI $TITLE"
           echo "  Systems:  ${{ inputs.system-dir }}"
@@ -73,17 +84,33 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          curl -X POST "$SLACK_WEBHOOK_URL" \
+          retry() {
+            local attempts=$1
+            local delay=$2
+            shift 2
+            local count=1
+            until "$@"; do
+              if [ "$count" -ge "$attempts" ]; then
+                return 1
+              fi
+              sleep "$delay"
+              count=$((count + 1))
+            done
+          }
+
+          retry 3 3 curl -sS -X POST "$SLACK_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
             -d "{
+              \"text\": \"${{ steps.prepare.outputs.mention }}\",
               \"attachments\": [{
                 \"color\": \"${{ steps.prepare.outputs.color }}\",
                 \"title\": \"${{ steps.prepare.outputs.emoji }} ${{ steps.prepare.outputs.title }}\",
                 \"fields\": [
-                  {\"title\": \"System\", \"value\": \"${{ inputs.system-dir }}\", \"short\": true},
+                  {\"title\": \"Systems\", \"value\": \"${{ inputs.system-dir }}\", \"short\": false},
                   {\"title\": \"Pipeline\", \"value\": \"${{ inputs.pipeline-type }}\", \"short\": true},
                   {\"title\": \"Branch\", \"value\": \"${{ github.ref_name }}\", \"short\": true},
-                  {\"title\": \"Actor\", \"value\": \"${{ github.actor }}\", \"short\": true}
+                  {\"title\": \"Actor\", \"value\": \"${{ github.actor }}\", \"short\": true},
+                  {\"title\": \"Run\", \"value\": \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\", \"short\": false}
                 ],
                 \"footer\": \"<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>\"
               }]
@@ -94,12 +121,34 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          curl -X POST "$DISCORD_WEBHOOK_URL" \
+          retry() {
+            local attempts=$1
+            local delay=$2
+            shift 2
+            local count=1
+            until "$@"; do
+              if [ "$count" -ge "$attempts" ]; then
+                return 1
+              fi
+              sleep "$delay"
+              count=$((count + 1))
+            done
+          }
+
+          retry 3 3 curl -sS -X POST "$DISCORD_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
             -d "{
+              \"content\": \"${{ steps.prepare.outputs.mention }}\",
               \"embeds\": [{
                 \"title\": \"${{ steps.prepare.outputs.emoji }} ${{ steps.prepare.outputs.title }}\",
-                \"description\": \"**System:** ${{ inputs.system-dir }}\\n**Pipeline:** ${{ inputs.pipeline-type }}\\n**Branch:** ${{ github.ref_name }}\\n**Actor:** ${{ github.actor }}\",
+                \"color\": ${{ steps.prepare.outputs.discord_color }},
+                \"description\": \"${{ inputs.error-details != '' && format('**Details:** {0}\\n', inputs.error-details) || '' }}\",
+                \"fields\": [
+                  {\"name\": \"Systems\", \"value\": \"${{ inputs.system-dir }}\", \"inline\": false},
+                  {\"name\": \"Pipeline\", \"value\": \"${{ inputs.pipeline-type }}\", \"inline\": true},
+                  {\"name\": \"Branch\", \"value\": \"${{ github.ref_name }}\", \"inline\": true},
+                  {\"name\": \"Actor\", \"value\": \"${{ github.actor }}\", \"inline\": true}
+                ],
                 \"url\": \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"
               }]
             }"

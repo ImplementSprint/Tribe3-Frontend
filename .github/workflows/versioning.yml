@@ -1,0 +1,99 @@
+name: "Reusable: Versioning"
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        required: true
+        type: string
+        description: "Versioning mode: test or main"
+    outputs:
+      version_tag:
+        description: "Resolved version tag"
+        value: ${{ jobs.version.outputs.version_tag }}
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    name: "Create Version Tag"
+    runs-on: ubuntu-latest
+    outputs:
+      version_tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Create and Push Tag
+        id: version
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          if [ "${MODE}" = "test" ]; then
+            PREFIX="test-v"
+            LATEST=$(git tag -l "${PREFIX}*" | grep -E '^test-v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+
+            if [ -z "${LATEST}" ]; then
+              NEXT_VERSION="1.0.0.0"
+            else
+              RAW_VERSION="${LATEST#${PREFIX}}"
+              IFS='.' read -r MAJOR MINOR PATCH BUILD <<< "${RAW_VERSION}"
+
+              BUILD=$((BUILD + 1))
+              if [ "${BUILD}" -ge 10 ]; then
+                BUILD=0
+                PATCH=$((PATCH + 1))
+              fi
+
+              if [ "${PATCH}" -ge 10 ]; then
+                PATCH=0
+                MINOR=$((MINOR + 1))
+              fi
+
+              if [ "${MINOR}" -ge 10 ]; then
+                MINOR=0
+                MAJOR=$((MAJOR + 1))
+              fi
+
+              NEXT_VERSION="${MAJOR}.${MINOR}.${PATCH}.${BUILD}"
+            fi
+
+            TAG="${PREFIX}${NEXT_VERSION}"
+          elif [ "${MODE}" = "main" ]; then
+            TEST_PREFIX="test-v"
+            MAIN_PREFIX="main-v"
+
+            LATEST_TEST=$(git tag -l "${TEST_PREFIX}*" | grep -E '^test-v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+            if [ -z "${LATEST_TEST}" ]; then
+              echo "❌ No test version tag found. main release tag requires a prior test tag."
+              exit 1
+            fi
+
+            VERSION_FROM_TEST="${LATEST_TEST#${TEST_PREFIX}}"
+            TAG="${MAIN_PREFIX}${VERSION_FROM_TEST}"
+          else
+            echo "❌ Invalid mode: ${MODE}. Expected test or main."
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --tags origin | grep -q "refs/tags/${TAG}$"; then
+            echo "tag=${TAG}" >> $GITHUB_OUTPUT
+            echo "ℹ️ Tag already exists: ${TAG}"
+            exit 0
+          fi
+
+          if [ "${MODE}" = "test" ]; then
+            git tag -a "${TAG}" -m "TEST version ${TAG}"
+          else
+            git tag -a "${TAG}" -m "MAIN release ${TAG}"
+          fi
+
+          git push origin "${TAG}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT

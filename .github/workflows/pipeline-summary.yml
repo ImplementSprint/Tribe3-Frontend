@@ -1,0 +1,80 @@
+name: "Reusable: Pipeline Summary"
+
+on:
+  workflow_call:
+    inputs:
+      pipeline-kind:
+        required: true
+        type: string
+        description: "single or multi"
+      system1-name:
+        required: false
+        type: string
+        default: "Frontend-Root"
+      system1-result:
+        required: true
+        type: string
+      system2-name:
+        required: false
+        type: string
+        default: ""
+      system2-result:
+        required: false
+        type: string
+        default: ""
+      system3-name:
+        required: false
+        type: string
+        default: ""
+      system3-result:
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  summary:
+    name: "Pipeline Results"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print Summary and Evaluate Status
+        env:
+          KIND: ${{ inputs.pipeline-kind }}
+          SYSTEM1_NAME: ${{ inputs.system1-name }}
+          SYSTEM1_RESULT: ${{ inputs.system1-result }}
+          SYSTEM2_NAME: ${{ inputs.system2-name }}
+          SYSTEM2_RESULT: ${{ inputs.system2-result }}
+          SYSTEM3_NAME: ${{ inputs.system3-name }}
+          SYSTEM3_RESULT: ${{ inputs.system3-result }}
+        run: |
+          if [ "${KIND}" = "single" ]; then
+            echo "Repository: ${{ github.repository }}"
+            echo "Branch:     ${{ github.ref_name }}"
+            echo "${SYSTEM1_NAME}:   ${SYSTEM1_RESULT}"
+            exit 0
+          fi
+
+          echo "╔══════════════════════════════════════════════════════╗"
+          echo "║          MASTER PIPELINE SUMMARY                     ║"
+          echo "╠══════════════════════════════════════════════════════╣"
+          echo "║ Repository: ${{ github.repository }}"
+          echo "║ Branch:     ${{ github.ref_name }}"
+          echo "║ Commit:     ${{ github.sha }}"
+          echo "║ Actor:      ${{ github.actor }}"
+          echo "║ Timestamp:  $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "╠══════════════════════════════════════════════════════╣"
+          echo "║ ${SYSTEM1_NAME}:   ${SYSTEM1_RESULT}"
+          [ -n "${SYSTEM2_NAME}" ] && echo "║ ${SYSTEM2_NAME}:   ${SYSTEM2_RESULT}"
+          [ -n "${SYSTEM3_NAME}" ] && echo "║ ${SYSTEM3_NAME}:   ${SYSTEM3_RESULT}"
+          echo "╚══════════════════════════════════════════════════════╝"
+
+          FAILED=false
+          if [[ "${SYSTEM1_RESULT}" == "failure" ]]; then FAILED=true; fi
+          if [ -n "${SYSTEM2_NAME}" ] && [[ "${SYSTEM2_RESULT}" == "failure" ]]; then FAILED=true; fi
+          if [ -n "${SYSTEM3_NAME}" ] && [[ "${SYSTEM3_RESULT}" == "failure" ]]; then FAILED=true; fi
+
+          if [ "$FAILED" = "true" ]; then
+            echo "❌ One or more pipelines failed!"
+            exit 1
+          fi
+
+          echo "✅ All pipelines completed successfully!"

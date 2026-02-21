@@ -1,0 +1,261 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  MASTER PIPELINE ORCHESTRATOR (FRONTEND SINGLE)                ║
+# ║  Branch Strategy: test → uat → main                             ║
+# ║                                                                  ║
+# ║  Single frontend project is expected at repository root (.)       ║
+# ║    VERCEL_PROJECT_ID_FE_SINGLE (repo secret)                     ║
+# ║                                                                  ║
+# ║  Optional repository variables for reuse/customization:          ║
+# ║    FE_SINGLE_SYSTEM_NAME (default: Frontend-Root)               ║
+# ║    FE_SINGLE_WORKING_DIR (default: .)                           ║
+# ║    FE_SINGLE_IMAGE_NAME (default: fe-single-web)                ║
+# ║    FE_SINGLE_VERCEL_PROJECT_SECRET (required, no default)       ║
+# ║    FE_SINGLE_PR_TOKEN_SECRET (default: GH_PR_TOKEN)             ║
+# ╚══════════════════════════════════════════════════════════════════╝
+name: "Master Pipeline Orchestrator — FE Single"
+
+on:
+  push:
+    branches: [test, uat, main]
+  pull_request:
+    branches: [test, uat, main]
+  workflow_dispatch:
+    inputs:
+      run_deploy:
+        description: "Run deploy jobs"
+        type: boolean
+        default: true
+      run_promotion:
+        description: "Run PR promotion jobs"
+        type: boolean
+        default: true
+      dry_run:
+        description: "Preview-only mode (skip deploy/tag push, print PR body)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  packages: write
+  pull-requests: write
+
+# Optional secret for orgs that block GITHUB_TOKEN PR creation:
+# GH_PR_TOKEN (preferred) or GHPR_TOKEN (legacy)
+
+concurrency:
+  group: master-pipeline-fe-single-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect-changes:
+    name: "Detect Changed Files"
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+      shared: ${{ steps.filter.outputs.shared }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect file changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            frontend:
+              - '**'
+            shared:
+              - '.github/**'
+              - 'package.json'
+              - 'sonar-project.properties'
+
+  frontend:
+    name: "${{ vars.FE_SINGLE_SYSTEM_NAME != '' && vars.FE_SINGLE_SYSTEM_NAME || 'Frontend-Root' }} Pipeline"
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.frontend == 'true' || needs.detect-changes.outputs.shared == 'true'
+    uses: ./.github/workflows/front-end-workflow.yml
+    with:
+      system-dir: ${{ vars.FE_SINGLE_WORKING_DIR != '' && vars.FE_SINGLE_WORKING_DIR || '.' }}
+      system-name: ${{ vars.FE_SINGLE_SYSTEM_NAME != '' && vars.FE_SINGLE_SYSTEM_NAME || 'Frontend-Root' }}
+      enable-security-scan: true
+    secrets: inherit
+
+  validate-vercel-secret-vars:
+    name: "Validate Vercel Secret-Name Variables"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure required vars are set
+        env:
+          PROJECT_SECRET_VAR: ${{ vars.FE_SINGLE_VERCEL_PROJECT_SECRET }}
+        run: |
+          if [ -z "${PROJECT_SECRET_VAR}" ]; then
+            echo "❌ Missing required repository variable FE_SINGLE_VERCEL_PROJECT_SECRET."
+            echo "Set FE_SINGLE_VERCEL_PROJECT_SECRET to the secret name that stores your Vercel project ID."
+            exit 1
+          fi
+
+  version-test:
+    name: "Version Tag — TEST"
+    needs: [frontend]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/test' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true') &&
+      (needs.frontend.result == 'success' || needs.frontend.result == 'skipped')
+    uses: ./.github/workflows/versioning.yml
+    with:
+      mode: test
+
+  deploy-test:
+    name: "TEST — ${{ vars.FE_SINGLE_SYSTEM_NAME != '' && vars.FE_SINGLE_SYSTEM_NAME || 'Frontend-Root' }}"
+    needs: [frontend, validate-vercel-secret-vars]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/test' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name != 'workflow_dispatch' || (github.event.inputs.run_deploy == 'true' && github.event.inputs.dry_run != 'true')) &&
+      (needs.frontend.result == 'success' || needs.frontend.result == 'skipped')
+    uses: ./.github/workflows/vercel-deploy.yml
+    with:
+      working-directory: ${{ vars.FE_SINGLE_WORKING_DIR != '' && vars.FE_SINGLE_WORKING_DIR || '.' }}
+      environment: preview
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets[vars.FE_SINGLE_VERCEL_PROJECT_SECRET] }}
+
+  deploy-uat:
+    name: "UAT — ${{ vars.FE_SINGLE_SYSTEM_NAME != '' && vars.FE_SINGLE_SYSTEM_NAME || 'Frontend-Root' }}"
+    needs: [frontend, validate-vercel-secret-vars]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/uat' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name != 'workflow_dispatch' || (github.event.inputs.run_deploy == 'true' && github.event.inputs.dry_run != 'true')) &&
+      (needs.frontend.result == 'success' || needs.frontend.result == 'skipped')
+    uses: ./.github/workflows/vercel-deploy.yml
+    with:
+      working-directory: ${{ vars.FE_SINGLE_WORKING_DIR != '' && vars.FE_SINGLE_WORKING_DIR || '.' }}
+      environment: preview
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets[vars.FE_SINGLE_VERCEL_PROJECT_SECRET] }}
+
+  production-gate:
+    name: "Production Readiness Gate"
+    needs: [frontend]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name != 'workflow_dispatch' || (github.event.inputs.run_deploy == 'true' && github.event.inputs.dry_run != 'true')) &&
+      (needs.frontend.result == 'success' || needs.frontend.result == 'skipped')
+    uses: ./.github/workflows/production-gate.yml
+    with:
+      system-dir: ${{ vars.FE_SINGLE_WORKING_DIR != '' && vars.FE_SINGLE_WORKING_DIR || '.' }}
+      app-type: web
+    secrets: inherit
+
+  deploy-prod:
+    name: "Prod — ${{ vars.FE_SINGLE_SYSTEM_NAME != '' && vars.FE_SINGLE_SYSTEM_NAME || 'Frontend-Root' }}"
+    needs: [production-gate, validate-vercel-secret-vars]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_deploy == 'true' && github.event.inputs.dry_run != 'true'))
+    uses: ./.github/workflows/vercel-deploy.yml
+    with:
+      working-directory: ${{ vars.FE_SINGLE_WORKING_DIR != '' && vars.FE_SINGLE_WORKING_DIR || '.' }}
+      environment: production
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets[vars.FE_SINGLE_VERCEL_PROJECT_SECRET] }}
+
+  version-main-release:
+    name: "Version Tag — MAIN Release"
+    needs: [deploy-prod]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true') &&
+      (needs.deploy-prod.result == 'success' || needs.deploy-prod.result == 'skipped')
+    uses: ./.github/workflows/versioning.yml
+    with:
+      mode: main
+
+  docker-main:
+    name: "GHCR — ${{ vars.FE_SINGLE_SYSTEM_NAME != '' && vars.FE_SINGLE_SYSTEM_NAME || 'Frontend-Root' }}"
+    needs: [version-main-release]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_deploy == 'true' && github.event.inputs.dry_run != 'true'))
+    uses: ./.github/workflows/docker-build.yml
+    with:
+      working-directory: ${{ vars.FE_SINGLE_WORKING_DIR != '' && vars.FE_SINGLE_WORKING_DIR || '.' }}
+      image-name: ${{ vars.FE_SINGLE_IMAGE_NAME != '' && vars.FE_SINGLE_IMAGE_NAME || 'fe-single-web' }}
+      release-tag: ${{ needs.version-main-release.outputs.version_tag }}
+      push-image: true
+      scan-vulnerabilities: true
+    secrets: inherit
+
+  create-pr-to-uat:
+    name: "Create PR → UAT"
+    needs: [frontend, version-test, deploy-test]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/test' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.run_promotion == 'true') &&
+      (needs.frontend.result == 'success' || needs.frontend.result == 'skipped') &&
+      needs.version-test.result == 'success' &&
+      (needs.deploy-test.result == 'success' || needs.deploy-test.result == 'skipped')
+    uses: ./.github/workflows/promotion.yml
+    with:
+      pipeline-kind: single
+      direction: test-to-uat
+      system1-name: ${{ vars.FE_SINGLE_SYSTEM_NAME != '' && vars.FE_SINGLE_SYSTEM_NAME || 'Frontend-Root' }}
+      system1-url: ${{ needs.deploy-test.outputs.deployment_url }}
+      system1-result: ${{ needs.frontend.result }}
+      version-tag: ${{ needs.version-test.outputs.version_tag }}
+      dry-run: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
+    secrets:
+      PR_TOKEN: ${{ secrets[vars.FE_SINGLE_PR_TOKEN_SECRET != '' && vars.FE_SINGLE_PR_TOKEN_SECRET || 'GH_PR_TOKEN'] != '' && secrets[vars.FE_SINGLE_PR_TOKEN_SECRET != '' && vars.FE_SINGLE_PR_TOKEN_SECRET || 'GH_PR_TOKEN'] || (secrets.GH_PR_TOKEN != '' && secrets.GH_PR_TOKEN || secrets.GHPR_TOKEN) }}
+
+  create-pr-to-main:
+    name: "Create PR → Main"
+    needs: [frontend, deploy-uat]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/uat' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.run_promotion == 'true') &&
+      (needs.frontend.result == 'success' || needs.frontend.result == 'skipped') &&
+      (needs.deploy-uat.result == 'success' || needs.deploy-uat.result == 'skipped')
+    uses: ./.github/workflows/promotion.yml
+    with:
+      pipeline-kind: single
+      direction: uat-to-main
+      system1-name: ${{ vars.FE_SINGLE_SYSTEM_NAME != '' && vars.FE_SINGLE_SYSTEM_NAME || 'Frontend-Root' }}
+      system1-url: ${{ needs.deploy-uat.outputs.deployment_url }}
+      system1-result: ${{ needs.frontend.result }}
+      dry-run: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
+    secrets:
+      PR_TOKEN: ${{ secrets[vars.FE_SINGLE_PR_TOKEN_SECRET != '' && vars.FE_SINGLE_PR_TOKEN_SECRET || 'GH_PR_TOKEN'] != '' && secrets[vars.FE_SINGLE_PR_TOKEN_SECRET != '' && vars.FE_SINGLE_PR_TOKEN_SECRET || 'GH_PR_TOKEN'] || (secrets.GH_PR_TOKEN != '' && secrets.GH_PR_TOKEN || secrets.GHPR_TOKEN) }}
+
+  pipeline-summary:
+    name: "Pipeline Summary"
+    needs: [frontend]
+    if: always()
+    uses: ./.github/workflows/pipeline-summary.yml
+    with:
+      pipeline-kind: single
+      system1-name: ${{ vars.FE_SINGLE_SYSTEM_NAME != '' && vars.FE_SINGLE_SYSTEM_NAME || 'Frontend-Root' }}
+      system1-result: ${{ needs.frontend.result }}
+
+  notify-pipeline:
+    name: "Notify Pipeline Status"
+    needs: [pipeline-summary, frontend]
+    if: always()
+    uses: ./.github/workflows/notifications.yml
+    with:
+      status: ${{ needs.frontend.result == 'success' && 'success' || (needs.frontend.result == 'cancelled' && 'cancelled' || 'failure') }}
+      system-dir: ${{ vars.FE_SINGLE_SYSTEM_NAME != '' && vars.FE_SINGLE_SYSTEM_NAME || 'Frontend-Root' }}
+      pipeline-type: FE Single Master
+      error-details: ${{ needs.frontend.result != 'success' && 'Master FE single pipeline reported failures.' || '' }}
+    secrets:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
