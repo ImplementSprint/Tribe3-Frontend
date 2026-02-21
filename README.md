@@ -217,10 +217,10 @@ For each sub-project, create a Vercel project via the dashboard or CLI:
 cd BayaniHub-Web
 vercel link
 # Select or create a project (e.g. "bayanihub-web-uat")
-# Framework Preset: Vite
+# Framework Preset: Next.js
 # Root Directory: ./ (since you're already inside BayaniHub-Web)
 # Build Command: npm run build (or leave default)
-# Output Directory: dist
+# Output Directory: (leave default for Next.js)
 ```
 
 Repeat for each project × environment combination:
@@ -331,8 +331,8 @@ Make sure `index.html` exists at the sub-project root (not inside `src/`).
 ### Vercel shows a white/blank page
 
 - **Check the branch being deployed.** If Vercel is building from `main` but your code is only on a feature branch, the build will produce an empty app.
-- Verify `vite.config.js` exists in the sub-project
-- Check the Vercel project **Root Directory** is set to the sub-project folder (e.g., `BayaniHub-Web`)
+- Verify `package.json` exists in the sub-project directory used by the workflow
+- Check the Vercel project **Root Directory** is `.` for that linked sub-project context (do not set `BayaniHub-Web` when the workflow already runs in `BayaniHub-Web`)
 
 ### Tests fail with "Cannot find module"
 
