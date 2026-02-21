@@ -38,7 +38,7 @@ Go to **Settings → Secrets and variables → Actions** in the GitHub repo and 
 
 ## 2. Branching Strategy
 
-Every repo uses **3 long-lived branches** with **PR-based promotion**:
+Every repo uses **3 long-lived branches** with **auto-promotion**:
 
 ```
   feature branch     test branch        uat branch          main branch
@@ -81,9 +81,18 @@ In GitHub → **Settings → Environments**:
 
 In GitHub → **Settings → Branches**:
 - Add branch protection for `test` (require PR, require status checks to pass)
-- Add branch protection for `uat` and `main` (require PR + required status checks)
+- Do **NOT** add branch protection rules that block direct pushes on `uat` and `main` — the auto-promote jobs need to push directly to these branches
 
-> **Important:** Promotion is PR-based (`test → uat` and `uat → main`). Keep direct pushes to protected branches blocked.
+> **Important:** Branch protection with required reviews on `uat` and `main` would block auto-promotion. The CI pipeline itself validates code quality at every stage, and the production gate provides the manual approval checkpoint.
+
+### Developer Workflow
+
+1. Dev creates `feature/my-feature` from `test`
+2. Dev pushes commits, opens PR → `test`
+3. CI runs on the PR — reviewer sees green/red checks
+4. Merge to `test` — CI runs, and if it passes, **auto-promotes to `uat`**
+5. UAT pipeline runs (CI + deploy to UAT) — if it passes, **auto-promotes to `main`**
+6. Main pipeline runs (CI) → **Production Gate (manual approval)** → deploys to production
 
 ### Developer Workflow
 
