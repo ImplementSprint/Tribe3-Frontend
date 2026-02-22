@@ -35,6 +35,21 @@ on:
         type: string
         default: "{}"
         description: "Deployment URLs by system as JSON object"
+      success-image-url:
+        required: false
+        type: string
+        default: ""
+        description: "Discord image URL shown when status=success"
+      failure-image-url:
+        required: false
+        type: string
+        default: ""
+        description: "Discord image URL shown when status=failure"
+      cancelled-image-url:
+        required: false
+        type: string
+        default: ""
+        description: "Discord image URL shown when status=cancelled"
     secrets:
       SLACK_WEBHOOK_URL:
         required: false
@@ -65,6 +80,9 @@ jobs:
           BEFORE_SHA: ${{ github.event.before }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           COMPARE_DEFAULT: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+          SUCCESS_IMAGE_URL: ${{ inputs['success-image-url'] }}
+          FAILURE_IMAGE_URL: ${{ inputs['failure-image-url'] }}
+          CANCELLED_IMAGE_URL: ${{ inputs['cancelled-image-url'] }}
         run: |
           SHORT_SHA="${COMMIT_SHA:0:7}"
 
@@ -128,6 +146,31 @@ jobs:
           echo "workflow_name=$WORKFLOW_NAME" >> $GITHUB_OUTPUT
           echo "run_attempt=$RUN_ATTEMPT" >> $GITHUB_OUTPUT
           echo "compare_url=$COMPARE_URL" >> $GITHUB_OUTPUT
+
+          IMAGE_URL=""
+          if [ "${STATUS}" = "success" ]; then
+            IMAGE_URL="${SUCCESS_IMAGE_URL}"
+          elif [ "${STATUS}" = "failure" ]; then
+            IMAGE_URL="${FAILURE_IMAGE_URL}"
+          else
+            IMAGE_URL="${CANCELLED_IMAGE_URL}"
+          fi
+
+          # Convert common Google Drive share links to direct-view links for Discord embeds.
+          DRIVE_ID=""
+          if echo "${IMAGE_URL}" | grep -Eq '^https://drive\.google\.com/file/d/[^/]+/view'; then
+            DRIVE_ID=$(echo "${IMAGE_URL}" | sed -E 's#^https://drive\.google\.com/file/d/([^/]+)/view.*#\1#')
+          elif echo "${IMAGE_URL}" | grep -Eq '^https://drive\.google\.com/open\?id='; then
+            DRIVE_ID=$(echo "${IMAGE_URL}" | sed -E 's#^https://drive\.google\.com/open\?id=([^&]+).*$#\1#')
+          elif echo "${IMAGE_URL}" | grep -Eq '^https://drive\.google\.com/uc\?id='; then
+            DRIVE_ID=$(echo "${IMAGE_URL}" | sed -E 's#^https://drive\.google\.com/uc\?id=([^&]+).*$#\1#')
+          fi
+
+          if [ -n "${DRIVE_ID}" ]; then
+            IMAGE_URL="https://drive.google.com/uc?export=view&id=${DRIVE_ID}"
+          fi
+
+          echo "image_url=${IMAGE_URL}" >> $GITHUB_OUTPUT
 
           echo "$EMOJI $TITLE"
           echo "  Systems:  ${SYSTEM_DIR}"
@@ -245,6 +288,7 @@ jobs:
               --arg deploymentUrlsJson '${{ inputs['deployment-urls-json'] }}' \
               --arg details '${{ inputs['error-details'] }}' \
               --argjson envColor ${{ steps.prepare.outputs.env_color }} \
+              --arg imageUrl '${{ steps.prepare.outputs.image_url }}' \
               '((try ($deploymentUrlsJson | fromjson) catch {}) | to_entries | map(select((.key | length) > 0 and ((.value | tostring) | length) > 0))) as $deploymentEntries |
               ($deploymentEntries | map("• " + .key + ": " + (.value | tostring)) | join("\n")) as $deploymentLines |
               ($deploymentEntries | length) as $deploymentCount |
@@ -271,6 +315,7 @@ jobs:
                       + (if ($deploymentUrl | length) > 0 then [{name:"Deployment", value:$deploymentUrl, inline:false}] else [] end)
                       + (if ($deploymentLines | length) > 0 and ($deploymentCount > 1 or ($deploymentUrl | length) == 0 or $firstDeploymentUrl != $deploymentUrl) then [{name:"Deployments", value:$deploymentLines, inline:false}] else [] end)
                     ),
+                    image: (if ($imageUrl | length) > 0 then {url:$imageUrl} else null end),
                     url: $runUrl
                   }
                 ]
