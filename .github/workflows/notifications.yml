@@ -171,6 +171,7 @@ jobs:
           fi
 
           echo "image_url=${IMAGE_URL}" >> $GITHUB_OUTPUT
+          echo "image_url_selected=${IMAGE_URL}"
 
           echo "$EMOJI $TITLE"
           echo "  Systems:  ${SYSTEM_DIR}"
@@ -314,8 +315,10 @@ jobs:
                       ]
                       + (if ($deploymentUrl | length) > 0 then [{name:"Deployment", value:$deploymentUrl, inline:false}] else [] end)
                       + (if ($deploymentLines | length) > 0 and ($deploymentCount > 1 or ($deploymentUrl | length) == 0 or $firstDeploymentUrl != $deploymentUrl) then [{name:"Deployments", value:$deploymentLines, inline:false}] else [] end)
+                      + (if ($imageUrl | length) > 0 then [{name:"Image", value:$imageUrl, inline:false}] else [] end)
                     ),
                     image: (if ($imageUrl | length) > 0 then {url:$imageUrl} else null end),
+                    thumbnail: (if ($imageUrl | length) > 0 then {url:$imageUrl} else null end),
                     url: $runUrl
                   }
                 ]
