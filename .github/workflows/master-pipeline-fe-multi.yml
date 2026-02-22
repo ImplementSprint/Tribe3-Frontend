@@ -110,6 +110,17 @@ jobs:
             fi
           fi
 
+          ACTIVE=$(echo "${ACTIVE}" | jq -c '
+            map(
+              . + {
+                version_stream: (
+                  ((.version_stream // .name // .dir // "system") | ascii_downcase | gsub("[^a-z0-9]+"; "-") | gsub("(^-+|-+$)"; ""))
+                  | if length > 0 then . else "system" end
+                )
+              }
+            )
+          ')
+
           ACTIVE_COUNT=$(echo "${ACTIVE}" | jq 'length')
           if [ "${ACTIVE_COUNT}" -gt 0 ]; then
             ACTIVE_LABEL=$(echo "${ACTIVE}" | jq -r 'map(.name) | join(", ")')
@@ -186,7 +197,7 @@ jobs:
             -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
 
   version-test:
-    name: "Version Tag — TEST"
+    name: "Version Tag — TEST (${{ matrix.system.name }})"
     needs: [frontend, active-systems, sonarcloud]
     if: >-
       always() &&
@@ -196,9 +207,14 @@ jobs:
       fromJson(needs.active-systems.outputs.active_count) > 0 &&
       (needs.sonarcloud.result == 'success' || needs.sonarcloud.result == 'skipped') &&
       (needs.frontend.result == 'success' || needs.frontend.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        system: ${{ fromJson(needs.active-systems.outputs.active_systems_json) }}
     uses: ./.github/workflows/versioning.yml
     with:
       mode: test
+      stream: ${{ matrix.system.version_stream }}
 
   deploy-test:
     name: "TEST — ${{ matrix.system.name }}"
@@ -321,11 +337,17 @@ jobs:
       - name: Update repository homepage URL
         if: ${{ steps.resolve-url.outputs.deployment_url != '' }}
         env:
-          GH_TOKEN: ${{ secrets.GH_PR_TOKEN }}
+          GH_PR_TOKEN_PRIMARY: ${{ secrets.GH_PR_TOKEN }}
+          GH_PR_TOKEN_LEGACY: ${{ secrets.GHPR_TOKEN }}
           DEPLOYMENT_URL: ${{ steps.resolve-url.outputs.deployment_url }}
         run: |
+          GH_TOKEN="${GH_PR_TOKEN_PRIMARY}"
           if [ -z "${GH_TOKEN}" ]; then
-            echo "⚠️ GH_PR_TOKEN is not set; skipping About homepage update."
+            GH_TOKEN="${GH_PR_TOKEN_LEGACY}"
+          fi
+
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "⚠️ GH_PR_TOKEN/GHPR_TOKEN is not set; skipping About homepage update."
             exit 0
           fi
 
@@ -336,7 +358,7 @@ jobs:
           fi
 
   version-main-release:
-    name: "Version Tag — MAIN Release"
+    name: "Version Tag — MAIN Release (${{ matrix.system.name }})"
     needs: [deploy-prod, update-about-link, active-systems]
     if: >-
       always() &&
@@ -345,13 +367,60 @@ jobs:
       (github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true') &&
       fromJson(needs.active-systems.outputs.active_count) > 0 &&
       (needs.deploy-prod.result == 'success' || needs.deploy-prod.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        system: ${{ fromJson(needs.active-systems.outputs.active_systems_json) }}
     uses: ./.github/workflows/versioning.yml
     with:
       mode: main
+      stream: ${{ matrix.system.version_stream }}
+
+  resolve-main-tags:
+    name: "Resolve MAIN Tags"
+    needs: [version-main-release, active-systems]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      fromJson(needs.active-systems.outputs.active_count) > 0 &&
+      (needs.version-main-release.result == 'success' || needs.version-main-release.result == 'skipped')
+    runs-on: ubuntu-latest
+    outputs:
+      tags_json: ${{ steps.resolve.outputs.tags_json }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build per-system MAIN tags JSON
+        id: resolve
+        env:
+          SYSTEMS_JSON: ${{ needs.active-systems.outputs.active_systems_json }}
+        run: |
+          TAGS_JSON='{}'
+
+          while IFS=$'\t' read -r NAME STREAM; do
+            if [ -z "${NAME}" ]; then
+              continue
+            fi
+
+            if [ -z "${STREAM}" ] || [ "${STREAM}" = "global" ]; then
+              PREFIX="main-v"
+            else
+              PREFIX="main-${STREAM}-v"
+            fi
+
+            TAG=$(git tag -l "${PREFIX}*" | grep -E "^${PREFIX}[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" | sort -V | tail -n 1)
+            TAGS_JSON=$(echo "${TAGS_JSON}" | jq -c --arg name "${NAME}" --arg tag "${TAG}" '. + {($name):$tag}')
+          done < <(echo "${SYSTEMS_JSON}" | jq -r '.[] | "\(.name)\t\(.version_stream // "global")"')
+
+          echo "tags_json=${TAGS_JSON}" >> "$GITHUB_OUTPUT"
 
   docker-main:
     name: "GHCR — ${{ matrix.system.name }}"
-    needs: [version-main-release, active-systems]
+    needs: [version-main-release, resolve-main-tags, active-systems]
     if: >-
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_deploy == 'true' && github.event.inputs.dry_run != 'true')) &&
@@ -364,7 +433,7 @@ jobs:
     with:
       working-directory: ${{ matrix.system.dir }}
       image-name: ${{ matrix.system.image }}
-      release-tag: ${{ needs.version-main-release.outputs.version_tag }}
+      release-tag: ${{ fromJson(needs.resolve-main-tags.outputs.tags_json)[matrix.system.name] }}
       push-image: true
       scan-vulnerabilities: true
     secrets: inherit
@@ -383,7 +452,13 @@ jobs:
     outputs:
       deployment_urls_json: ${{ steps.build.outputs.deployment_urls_json }}
       results_json: ${{ steps.build.outputs.results_json }}
+      versions_json: ${{ steps.build.outputs.versions_json }}
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Build payload JSON
         id: build
         env:
@@ -427,8 +502,29 @@ jobs:
 
           RESULTS_JSON=$(echo "${SYSTEMS_JSON}" | jq -c --arg result "${RESULT_VALUE}" 'reduce .[] as $s ({}; .[$s.name] = $result)')
 
+          VERSIONS_JSON=$(echo "${SYSTEMS_JSON}" | jq -c 'reduce .[] as $s ({}; .[$s.name] = "N/A")')
+          while IFS=$'\t' read -r NAME STREAM; do
+            if [ -z "${NAME}" ]; then
+              continue
+            fi
+
+            if [ -z "${STREAM}" ] || [ "${STREAM}" = "global" ]; then
+              PREFIX="test-v"
+            else
+              PREFIX="test-${STREAM}-v"
+            fi
+
+            TAG=$(git tag -l "${PREFIX}*" | grep -E "^${PREFIX}[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" | sort -V | tail -n 1)
+            if [ -z "${TAG}" ]; then
+              TAG="N/A"
+            fi
+
+            VERSIONS_JSON=$(echo "${VERSIONS_JSON}" | jq -c --arg name "${NAME}" --arg tag "${TAG}" '. + {($name):$tag}')
+          done < <(echo "${SYSTEMS_JSON}" | jq -r '.[] | "\(.name)\t\(.version_stream // "global")"')
+
           echo "deployment_urls_json=${DEPLOYMENT_URLS_JSON}" >> "$GITHUB_OUTPUT"
           echo "results_json=${RESULTS_JSON}" >> "$GITHUB_OUTPUT"
+          echo "versions_json=${VERSIONS_JSON}" >> "$GITHUB_OUTPUT"
 
   prepare-promotion-uat-payload:
     name: "Prepare Promotion Payload (UAT→MAIN)"
@@ -444,7 +540,13 @@ jobs:
     outputs:
       deployment_urls_json: ${{ steps.build.outputs.deployment_urls_json }}
       results_json: ${{ steps.build.outputs.results_json }}
+      versions_json: ${{ steps.build.outputs.versions_json }}
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Build payload JSON
         id: build
         env:
@@ -488,8 +590,29 @@ jobs:
 
           RESULTS_JSON=$(echo "${SYSTEMS_JSON}" | jq -c --arg result "${RESULT_VALUE}" 'reduce .[] as $s ({}; .[$s.name] = $result)')
 
+          VERSIONS_JSON=$(echo "${SYSTEMS_JSON}" | jq -c 'reduce .[] as $s ({}; .[$s.name] = "N/A")')
+          while IFS=$'\t' read -r NAME STREAM; do
+            if [ -z "${NAME}" ]; then
+              continue
+            fi
+
+            if [ -z "${STREAM}" ] || [ "${STREAM}" = "global" ]; then
+              PREFIX="test-v"
+            else
+              PREFIX="test-${STREAM}-v"
+            fi
+
+            TAG=$(git tag -l "${PREFIX}*" | grep -E "^${PREFIX}[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" | sort -V | tail -n 1)
+            if [ -z "${TAG}" ]; then
+              TAG="N/A"
+            fi
+
+            VERSIONS_JSON=$(echo "${VERSIONS_JSON}" | jq -c --arg name "${NAME}" --arg tag "${TAG}" '. + {($name):$tag}')
+          done < <(echo "${SYSTEMS_JSON}" | jq -r '.[] | "\(.name)\t\(.version_stream // "global")"')
+
           echo "deployment_urls_json=${DEPLOYMENT_URLS_JSON}" >> "$GITHUB_OUTPUT"
           echo "results_json=${RESULTS_JSON}" >> "$GITHUB_OUTPUT"
+          echo "versions_json=${VERSIONS_JSON}" >> "$GITHUB_OUTPUT"
 
   create-pr-to-uat:
     name: "Create PR → UAT"
@@ -510,8 +633,8 @@ jobs:
       systems-json: ${{ needs.active-systems.outputs.active_systems_json }}
       deployment-urls-json: ${{ needs.prepare-promotion-test-payload.outputs.deployment_urls_json }}
       results-json: ${{ needs.prepare-promotion-test-payload.outputs.results_json }}
+      versions-json: ${{ needs.prepare-promotion-test-payload.outputs.versions_json }}
       system1-result: ${{ needs.frontend.result }}
-      version-tag: ${{ needs.version-test.outputs.version_tag }}
       tests-status: ${{ needs.frontend.result }}
       lint-status: ${{ needs.frontend.result }}
       security-status: ${{ needs.frontend.result }}
@@ -539,6 +662,7 @@ jobs:
       systems-json: ${{ needs.active-systems.outputs.active_systems_json }}
       deployment-urls-json: ${{ needs.prepare-promotion-uat-payload.outputs.deployment_urls_json }}
       results-json: ${{ needs.prepare-promotion-uat-payload.outputs.results_json }}
+      versions-json: ${{ needs.prepare-promotion-uat-payload.outputs.versions_json }}
       system1-result: ${{ needs.frontend.result }}
       tests-status: ${{ needs.frontend.result }}
       lint-status: ${{ needs.frontend.result }}
@@ -548,6 +672,52 @@ jobs:
       dry-run: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
     secrets:
       PR_TOKEN: ${{ secrets.GH_PR_TOKEN }}
+
+  prepare-notify-prod-payload:
+    name: "Prepare Notify Payload (MAIN)"
+    needs: [active-systems, deploy-prod]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      fromJson(needs.active-systems.outputs.active_count) > 0 &&
+      (needs.deploy-prod.result == 'success' || needs.deploy-prod.result == 'skipped')
+    runs-on: ubuntu-latest
+    outputs:
+      deployment_urls_json: ${{ steps.build.outputs.deployment_urls_json }}
+    steps:
+      - name: Build payload JSON
+        id: build
+        env:
+          SYSTEMS_JSON: ${{ needs.active-systems.outputs.active_systems_json }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          RESPONSE=$(curl -sS -H "Authorization: Bearer ${VERCEL_TOKEN}" "https://api.vercel.com/v6/deployments?target=production&meta-githubCommitSha=${COMMIT_SHA}&limit=100")
+          if ! echo "${RESPONSE}" | jq -e . >/dev/null 2>&1; then
+            RESPONSE='{"deployments":[]}'
+          fi
+
+          DEPLOYMENT_URLS_JSON=$(echo "${SYSTEMS_JSON}" | jq -c --argjson data "${RESPONSE}" --arg runUrl "${RUN_URL}" '
+            reduce .[] as $s ({};
+              ($s.name // "") as $name |
+              ($s.dir // "" | gsub("^\\./"; "") | split("/")[0]) as $dirKey |
+              ($name | ascii_downcase) as $nameLower |
+              ($dirKey | ascii_downcase) as $dirLower |
+              .[$name] = (
+                [ $data.deployments[]?
+                  | select((.state // "") == "READY")
+                  | { n: ((.name // "") | ascii_downcase), u: (if (.url // "") == "" then "" else ("https://" + .url) end) }
+                  | select(.u != "")
+                  | select(.n == $nameLower or .n == $dirLower)
+                  | .u
+                ] | first // $runUrl
+              )
+            )
+          ')
+
+          echo "deployment_urls_json=${DEPLOYMENT_URLS_JSON}" >> "$GITHUB_OUTPUT"
 
   pipeline-summary:
     name: "Pipeline Summary"
@@ -627,7 +797,7 @@ jobs:
 
   notify-pipeline:
     name: "Notify Pipeline Status"
-    needs: [pipeline-summary, frontend, active-systems, auto-revert-on-failure]
+    needs: [pipeline-summary, frontend, active-systems, auto-revert-on-failure, prepare-promotion-test-payload, prepare-promotion-uat-payload, prepare-notify-prod-payload]
     if: always()
     uses: ./.github/workflows/notifications.yml
     with:
@@ -636,6 +806,7 @@ jobs:
       pipeline-type: FE Multi Master
       error-details: ${{ needs.frontend.result != 'success' && needs.frontend.result != 'skipped' && 'Master FE multi pipeline reported failures.' || '' }}
       deployment-url: ''
+      deployment-urls-json: ${{ github.ref_name == 'main' && needs.prepare-notify-prod-payload.outputs.deployment_urls_json || (github.ref_name == 'uat' && needs.prepare-promotion-uat-payload.outputs.deployment_urls_json || (github.ref_name == 'test' && needs.prepare-promotion-test-payload.outputs.deployment_urls_json || '{}')) }}
     secrets:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

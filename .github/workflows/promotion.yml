@@ -39,6 +39,10 @@ on:
         required: false
         type: string
         default: ""
+      versions-json:
+        required: false
+        type: string
+        default: "{}"
       systems-json:
         required: false
         type: string
@@ -129,6 +133,7 @@ jobs:
           DEPLOYMENT_URLS_JSON_INPUT: ${{ inputs.deployment-urls-json }}
           RESULTS_JSON_INPUT: ${{ inputs.results-json }}
           VERSION_TAG_INPUT: ${{ inputs.version-tag }}
+          VERSIONS_JSON_INPUT: ${{ inputs.versions-json }}
           DRY_RUN: ${{ inputs.dry-run }}
           TESTS_STATUS_INPUT: ${{ inputs.tests-status }}
           LINT_STATUS_INPUT: ${{ inputs.lint-status }}
@@ -164,10 +169,10 @@ jobs:
             FOOTER="*Merge this PR to trigger UAT deployment.*"
             INTRO="This PR was **automatically created** after all CI checks and TEST deployments passed on the \`test\` branch."
 
-            if [ -z "${VERSION_TAG}" ] || [ "${VERSION_TAG}" = "test-v" ]; then
+            if [ "${PIPELINE_KIND}" = "single" ] && { [ -z "${VERSION_TAG}" ] || [ "${VERSION_TAG}" = "test-v" ]; }; then
               VERSION_TAG=$(git tag -l 'test-v*' | grep -E '^test-v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
             fi
-            if [ -z "${VERSION_TAG}" ]; then
+            if [ "${PIPELINE_KIND}" = "single" ] && [ -z "${VERSION_TAG}" ]; then
               echo "❌ Unable to resolve TEST version tag for PR body."
               exit 1
             fi
@@ -180,7 +185,7 @@ jobs:
             FOOTER="*Merge this PR to deploy to production. A production readiness gate will run automatically.*"
             INTRO="This PR was **automatically created** after all CI checks and UAT deployments passed on the \`uat\` branch."
 
-            if [ -z "${VERSION_TAG}" ]; then
+            if [ "${PIPELINE_KIND}" = "single" ] && [ -z "${VERSION_TAG}" ]; then
               VERSION_TAG=$(git tag -l 'test-v*' | grep -E '^test-v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
             fi
           else
@@ -249,6 +254,12 @@ jobs:
             fi
           fi
 
+          if [ -n "${VERSIONS_JSON_INPUT}" ] && echo "${VERSIONS_JSON_INPUT}" | jq -e . >/dev/null 2>&1 && [ "$(echo "${VERSIONS_JSON_INPUT}" | jq 'length')" -gt 0 ]; then
+            VERSIONS_JSON="${VERSIONS_JSON_INPUT}"
+          else
+            VERSIONS_JSON=$(echo "${SYSTEMS_JSON}" | jq -c --arg version "${VERSION_TAG}" 'reduce .[] as $s ({}; .[$s.name] = $version)')
+          fi
+
             if [ "${PIPELINE_KIND}" = "single" ]; then
               if [ -z "${SYSTEM1_NAME}" ]; then
                 echo "❌ system1-name is required for single pipeline-kind."
@@ -285,6 +296,11 @@ jobs:
                 .[$s.name] = ((($results[$s.name] // "") | tostring) | if length > 0 then . else $defaultResult end)
               )')
 
+            VERSIONS_JSON=$(echo "${SYSTEMS_JSON}" | jq -c --argjson versions "${VERSIONS_JSON}" --arg defaultVersion "${VERSION_TAG}" '
+              reduce .[] as $s ({};
+                .[$s.name] = ((($versions[$s.name] // "") | tostring) | if length > 0 then . else (if ($defaultVersion | length) > 0 then $defaultVersion else "N/A" end) end)
+              )')
+
           CHECKLIST=$(echo "${SYSTEMS_JSON}" | jq -r --arg label "${CONTEXT_LABEL}" 'map("- [ ] Verified \(.name) on \($label)") | join("\n")')
           ROWS=$(echo "${SYSTEMS_JSON}" | jq -r --argjson urls "${DEPLOYMENT_URLS_JSON}" --arg runUrl "${RUN_URL}" '
             .[]
@@ -309,9 +325,15 @@ jobs:
 
           EVIDENCE_ROWS=$(echo "${SYSTEMS_JSON}" | jq -r --argjson results "${RESULTS_JSON}" --arg defaultResult "${DEFAULT_RESULT}" '.[] | "| CI — \(.name) | " + ((($results[.name] // "") | tostring) | if length > 0 then . else $defaultResult end) + " |"')
           EVIDENCE_ROWS=$(printf "%s\n| Deployment Links | %s available |" "${EVIDENCE_ROWS}" "${AVAILABLE_LINKS}")
-          EVIDENCE_ROWS=$(printf "%s\n| Version Tag | %s |" "${EVIDENCE_ROWS}" "${VERSION_TAG:-N/A}")
+          VERSION_ROWS=$(echo "${SYSTEMS_JSON}" | jq -r --argjson versions "${VERSIONS_JSON}" '.[] | "| Version — \(.name) | " + ((($versions[.name] // "") | tostring) | if length > 0 then . else "N/A" end) + " |"')
+          EVIDENCE_ROWS=$(printf "%s\n%s" "${EVIDENCE_ROWS}" "${VERSION_ROWS}")
 
-          RELEASE_SUMMARY=$(printf -- "| Metric | Value |\n|--------|-------|\n| Version Tag | %s |\n| Short SHA | %s |\n| Compare | [View changes](%s) |\n| Pipeline Result | %s |" "${VERSION_TAG:-N/A}" "${SHORT_SHA}" "${COMPARE_URL}" "${PIPELINE_RESULT}")
+          RELEASE_VERSION_VALUE="${VERSION_TAG:-N/A}"
+          if [ "${PIPELINE_KIND}" = "multi" ]; then
+            RELEASE_VERSION_VALUE="Per-system (see Evidence)"
+          fi
+
+          RELEASE_SUMMARY=$(printf -- "| Metric | Value |\n|--------|-------|\n| Version Tag | %s |\n| Short SHA | %s |\n| Compare | [View changes](%s) |\n| Pipeline Result | %s |" "${RELEASE_VERSION_VALUE}" "${SHORT_SHA}" "${COMPARE_URL}" "${PIPELINE_RESULT}")
           QUALITY_GATES=$(printf -- "| Gate | Status |\n|------|--------|\n| Tests | %s |\n| Lint | %s |\n| Security | %s |\n| Sonar | %s |" "${TESTS_STATUS}" "${LINT_STATUS}" "${SECURITY_STATUS}" "${SONAR_STATUS}")
 
           DETAILS=$(printf -- "- **Source branch:** %s\n- **Target branch:** %s" "${SOURCE_BRANCH}" "${TARGET_BRANCH}")

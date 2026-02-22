@@ -7,6 +7,11 @@ on:
         required: true
         type: string
         description: "Versioning mode: test or main"
+      stream:
+        required: false
+        type: string
+        default: "global"
+        description: "Version stream key (global keeps legacy test-v/main-v tags)"
     outputs:
       version_tag:
         description: "Resolved version tag"
@@ -32,10 +37,24 @@ jobs:
         id: version
         env:
           MODE: ${{ inputs.mode }}
+          STREAM: ${{ inputs.stream }}
         run: |
+          STREAM_KEY=$(echo "${STREAM}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')
+          if [ -z "${STREAM_KEY}" ]; then
+            STREAM_KEY="global"
+          fi
+
+          if [ "${STREAM_KEY}" = "global" ]; then
+            TEST_PREFIX="test-v"
+            MAIN_PREFIX="main-v"
+          else
+            TEST_PREFIX="test-${STREAM_KEY}-v"
+            MAIN_PREFIX="main-${STREAM_KEY}-v"
+          fi
+
           if [ "${MODE}" = "test" ]; then
-            PREFIX="test-v"
-            LATEST=$(git tag -l "${PREFIX}*" | grep -E '^test-v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+            PREFIX="${TEST_PREFIX}"
+            LATEST=$(git tag -l "${PREFIX}*" | grep -E "^${PREFIX}[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" | sort -V | tail -n 1)
 
             if [ -z "${LATEST}" ]; then
               NEXT_VERSION="1.0.0.0"
@@ -64,12 +83,9 @@ jobs:
 
             TAG="${PREFIX}${NEXT_VERSION}"
           elif [ "${MODE}" = "main" ]; then
-            TEST_PREFIX="test-v"
-            MAIN_PREFIX="main-v"
-
-            LATEST_TEST=$(git tag -l "${TEST_PREFIX}*" | grep -E '^test-v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+            LATEST_TEST=$(git tag -l "${TEST_PREFIX}*" | grep -E "^${TEST_PREFIX}[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" | sort -V | tail -n 1)
             if [ -z "${LATEST_TEST}" ]; then
-              echo "❌ No test version tag found. main release tag requires a prior test tag."
+              echo "❌ No test version tag found for stream '${STREAM_KEY}'. main release tag requires a prior test tag."
               exit 1
             fi
 
