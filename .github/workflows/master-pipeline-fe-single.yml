@@ -1,0 +1,395 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  MASTER PIPELINE ORCHESTRATOR (FRONTEND SINGLE)                ║
+# ║  Branch Strategy: test → uat → main                             ║
+# ║                                                                  ║
+# ║  Single frontend project is expected at repository root (.)       ║
+# ║    VERCEL_PROJECT_ID_FE_SINGLE (repo secret)                     ║
+# ║                                                                  ║
+# ║  Optional repository variables for reuse/customization:          ║
+# ║    FE_SINGLE_SYSTEM_JSON (preferred; object or one-item array)  ║
+# ║    FE_SINGLE_SYSTEM_NAME (default: Frontend-Root)               ║
+# ║    FE_SINGLE_WORKING_DIR (default: .)                           ║
+# ║    FE_SINGLE_IMAGE_NAME (default: fe-single-web)                ║
+# ║    FE_SINGLE_VERCEL_PROJECT_SECRET (required, no default)       ║
+# ║    Uses org/repo secret GH_PR_TOKEN for promotion PRs           ║
+# ╚══════════════════════════════════════════════════════════════════╝
+name: "Master Pipeline Orchestrator — FE Single"
+
+on:
+  push:
+    branches: [test, uat, main]
+  pull_request:
+    branches: [test, uat, main]
+  workflow_dispatch:
+    inputs:
+      run_deploy:
+        description: "Run deploy jobs"
+        type: boolean
+        default: true
+      run_promotion:
+        description: "Run PR promotion jobs"
+        type: boolean
+        default: true
+      dry_run:
+        description: "Preview-only mode (skip deploy/tag push, print PR body)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  packages: write
+  pull-requests: write
+  security-events: write
+
+# Optional secret for orgs that block GITHUB_TOKEN PR creation:
+# GH_PR_TOKEN (preferred) or GHPR_TOKEN (legacy)
+
+concurrency:
+  group: master-pipeline-fe-single-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect-changes:
+    name: "Detect Changed Files"
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+      shared: ${{ steps.filter.outputs.shared }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect file changes
+        id: filter
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36
+        with:
+          filters: |
+            frontend:
+              - '**'
+            shared:
+              - '.github/**'
+              - 'package.json'
+              - 'sonar-project.properties'
+
+  systems-config:
+    name: "Resolve FE Single Configuration"
+    runs-on: ubuntu-latest
+    outputs:
+      system_name: ${{ steps.resolve.outputs.system_name }}
+      working_dir: ${{ steps.resolve.outputs.working_dir }}
+      image_name: ${{ steps.resolve.outputs.image_name }}
+      vercel_project_secret: ${{ steps.resolve.outputs.vercel_project_secret }}
+    steps:
+      - name: Resolve FE single config
+        id: resolve
+        env:
+          FE_SINGLE_SYSTEM_JSON: ${{ vars.FE_SINGLE_SYSTEM_JSON }}
+        run: |
+          if [ -z "${FE_SINGLE_SYSTEM_JSON}" ]; then
+            echo "❌ Missing required repository variable FE_SINGLE_SYSTEM_JSON."
+            exit 1
+          fi
+
+          CONFIG=$(echo "${FE_SINGLE_SYSTEM_JSON}" | jq -c 'if type == "array" then .[0] else . end')
+
+          echo "${CONFIG}" | jq -e 'type == "object"' >/dev/null
+          echo "${CONFIG}" | jq -e '(.name|type=="string" and length>0) and (.dir|type=="string" and length>0) and (.image|type=="string" and length>0) and (.vercel_project_secret|type=="string" and length>0)' >/dev/null
+
+          SYSTEM_NAME=$(echo "${CONFIG}" | jq -r '.name')
+          WORKING_DIR=$(echo "${CONFIG}" | jq -r '.dir')
+          IMAGE_NAME=$(echo "${CONFIG}" | jq -r '.image')
+          VERCEL_PROJECT_SECRET=$(echo "${CONFIG}" | jq -r '.vercel_project_secret')
+
+          echo "system_name=${SYSTEM_NAME}" >> "$GITHUB_OUTPUT"
+          echo "working_dir=${WORKING_DIR}" >> "$GITHUB_OUTPUT"
+          echo "image_name=${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "vercel_project_secret=${VERCEL_PROJECT_SECRET}" >> "$GITHUB_OUTPUT"
+
+  frontend:
+    name: "${{ needs.systems-config.outputs.system_name }} Pipeline"
+    needs: [detect-changes, systems-config]
+    if: needs.detect-changes.outputs.frontend == 'true' || needs.detect-changes.outputs.shared == 'true'
+    uses: ./.github/workflows/front-end-workflow.yml
+    with:
+      system-dir: ${{ needs.systems-config.outputs.working_dir }}
+      system-name: ${{ needs.systems-config.outputs.system_name }}
+      enable-security-scan: true
+    secrets: inherit
+
+  version-test:
+    name: "Version Tag — TEST"
+    needs: [frontend]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/test' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true') &&
+      (needs.frontend.result == 'success' || needs.frontend.result == 'skipped')
+    uses: ./.github/workflows/versioning.yml
+    with:
+      mode: test
+
+  deploy-test:
+    name: "TEST — ${{ needs.systems-config.outputs.system_name }}"
+    needs: [frontend, systems-config]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/test' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name != 'workflow_dispatch' || (github.event.inputs.run_deploy == 'true' && github.event.inputs.dry_run != 'true')) &&
+      (needs.frontend.result == 'success' || needs.frontend.result == 'skipped')
+    uses: ./.github/workflows/vercel-deploy.yml
+    with:
+      working-directory: ${{ needs.systems-config.outputs.working_dir }}
+      environment: preview
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets[needs.systems-config.outputs.vercel_project_secret] }}
+
+  deploy-uat:
+    name: "UAT — ${{ needs.systems-config.outputs.system_name }}"
+    needs: [frontend, systems-config]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/uat' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name != 'workflow_dispatch' || (github.event.inputs.run_deploy == 'true' && github.event.inputs.dry_run != 'true')) &&
+      (needs.frontend.result == 'success' || needs.frontend.result == 'skipped')
+    uses: ./.github/workflows/vercel-deploy.yml
+    with:
+      working-directory: ${{ needs.systems-config.outputs.working_dir }}
+      environment: preview
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets[needs.systems-config.outputs.vercel_project_secret] }}
+
+  production-gate:
+    name: "Production Readiness Gate"
+    needs: [frontend, systems-config]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name != 'workflow_dispatch' || (github.event.inputs.run_deploy == 'true' && github.event.inputs.dry_run != 'true')) &&
+      (needs.frontend.result == 'success' || needs.frontend.result == 'skipped')
+    uses: ./.github/workflows/production-gate.yml
+    with:
+      system-dir: ${{ needs.systems-config.outputs.working_dir }}
+      app-type: web
+    secrets: inherit
+
+  deploy-prod:
+    name: "Prod — ${{ needs.systems-config.outputs.system_name }}"
+    needs: [production-gate, systems-config]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_deploy == 'true' && github.event.inputs.dry_run != 'true'))
+    uses: ./.github/workflows/vercel-deploy.yml
+    with:
+      working-directory: ${{ needs.systems-config.outputs.working_dir }}
+      environment: production
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets[needs.systems-config.outputs.vercel_project_secret] }}
+
+  update-about-link:
+    name: "Update Repository About Link"
+    needs: [deploy-prod]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      needs.deploy-prod.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update repository homepage URL
+        env:
+          GH_PR_TOKEN_PRIMARY: ${{ secrets.GH_PR_TOKEN }}
+          GH_PR_TOKEN_LEGACY: ${{ secrets.GHPR_TOKEN }}
+          DEPLOYMENT_URL: ${{ needs.deploy-prod.outputs.deployment_url }}
+        run: |
+          GH_TOKEN="${GH_PR_TOKEN_PRIMARY}"
+          if [ -z "${GH_TOKEN}" ]; then
+            GH_TOKEN="${GH_PR_TOKEN_LEGACY}"
+          fi
+          export GH_TOKEN
+
+          if [ -z "${DEPLOYMENT_URL}" ]; then
+            echo "⚠️ No deployment URL available; skipping About homepage update."
+            exit 0
+          fi
+
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "⚠️ GH_PR_TOKEN/GHPR_TOKEN is not set; skipping About homepage update."
+            exit 0
+          fi
+
+          if gh api --method PATCH "repos/${{ github.repository }}" -f homepage="${DEPLOYMENT_URL}" >/dev/null 2>&1; then
+            echo "✅ Updated repository About homepage to ${DEPLOYMENT_URL}"
+          else
+            echo "⚠️ Failed to update repository About homepage (token may lack admin rights)."
+          fi
+
+  version-main-release:
+    name: "Version Tag — MAIN Release"
+    needs: [deploy-prod, update-about-link]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true') &&
+      (needs.deploy-prod.result == 'success' || needs.deploy-prod.result == 'skipped')
+    uses: ./.github/workflows/versioning.yml
+    with:
+      mode: main
+
+  docker-main:
+    name: "GHCR — ${{ needs.systems-config.outputs.system_name }}"
+    needs: [version-main-release, systems-config]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_deploy == 'true' && github.event.inputs.dry_run != 'true'))
+    uses: ./.github/workflows/docker-build.yml
+    with:
+      working-directory: ${{ needs.systems-config.outputs.working_dir }}
+      image-name: ${{ needs.systems-config.outputs.image_name }}
+      release-tag: ${{ needs.version-main-release.outputs.version_tag }}
+      push-image: true
+      scan-vulnerabilities: true
+    secrets: inherit
+
+  create-pr-to-uat:
+    name: "Create PR → UAT"
+    needs: [frontend, version-test, deploy-test, systems-config]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/test' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.run_promotion == 'true') &&
+      (needs.frontend.result == 'success' || needs.frontend.result == 'skipped') &&
+      needs.version-test.result == 'success' &&
+      (needs.deploy-test.result == 'success' || needs.deploy-test.result == 'skipped')
+    uses: ./.github/workflows/promotion.yml
+    with:
+      pipeline-kind: single
+      direction: test-to-uat
+      system1-name: ${{ needs.systems-config.outputs.system_name }}
+      system1-url: ${{ needs.deploy-test.outputs.deployment_url }}
+      system1-result: ${{ needs.frontend.result }}
+      version-tag: ${{ needs.version-test.outputs.version_tag }}
+      tests-status: ${{ needs.frontend.result }}
+      lint-status: ${{ needs.frontend.result }}
+      security-status: ${{ needs.frontend.result }}
+      sonar-status: ${{ needs.frontend.result }}
+      pipeline-result: ${{ (needs.frontend.result == 'success' || needs.frontend.result == 'skipped') && 'success' || (needs.frontend.result == 'cancelled' && 'cancelled' || 'failure') }}
+      dry-run: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
+    secrets:
+      PR_TOKEN: ${{ secrets.GH_PR_TOKEN }}
+
+  create-pr-to-main:
+    name: "Create PR → Main"
+    needs: [frontend, deploy-uat, systems-config]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/uat' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.run_promotion == 'true') &&
+      (needs.frontend.result == 'success' || needs.frontend.result == 'skipped') &&
+      (needs.deploy-uat.result == 'success' || needs.deploy-uat.result == 'skipped')
+    uses: ./.github/workflows/promotion.yml
+    with:
+      pipeline-kind: single
+      direction: uat-to-main
+      system1-name: ${{ needs.systems-config.outputs.system_name }}
+      system1-url: ${{ needs.deploy-uat.outputs.deployment_url }}
+      system1-result: ${{ needs.frontend.result }}
+      tests-status: ${{ needs.frontend.result }}
+      lint-status: ${{ needs.frontend.result }}
+      security-status: ${{ needs.frontend.result }}
+      sonar-status: ${{ needs.frontend.result }}
+      pipeline-result: ${{ (needs.frontend.result == 'success' || needs.frontend.result == 'skipped') && 'success' || (needs.frontend.result == 'cancelled' && 'cancelled' || 'failure') }}
+      dry-run: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
+    secrets:
+      PR_TOKEN: ${{ secrets.GH_PR_TOKEN }}
+
+  pipeline-summary:
+    name: "Pipeline Summary"
+    needs: [frontend, systems-config]
+    if: always()
+    uses: ./.github/workflows/pipeline-summary.yml
+    with:
+      pipeline-kind: single
+      system1-name: ${{ needs.systems-config.outputs.system_name }}
+      system1-result: ${{ needs.frontend.result }}
+
+  auto-revert-on-failure:
+    name: "Auto Revert on Failure"
+    needs:
+      [
+        systems-config,
+        frontend,
+        version-test,
+        deploy-test,
+        deploy-uat,
+        production-gate,
+        deploy-prod,
+        update-about-link,
+        version-main-release,
+        docker-main,
+        create-pr-to-uat,
+        create-pr-to-main,
+        pipeline-summary,
+      ]
+    if: >-
+      always() &&
+      github.event_name == 'push' &&
+      contains(needs.*.result, 'failure') &&
+      !contains(github.event.head_commit.message, '[skip-revert]') &&
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      !contains(github.event.head_commit.message, '[ci skip]') &&
+      !startsWith(github.event.head_commit.message, 'Revert "')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Create rollback commit
+        env:
+          BRANCH_NAME: ${{ github.ref_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin "${BRANCH_NAME}" --depth=50
+          git checkout -B "${BRANCH_NAME}" "origin/${BRANCH_NAME}"
+
+          export GIT_EDITOR=:
+
+          if git revert --no-edit "${GITHUB_SHA}"; then
+            git commit --amend -m "$(git log -1 --pretty=%B) [skip ci] [skip-revert]"
+            echo "✅ Created revert commit from ${GITHUB_SHA}."
+          elif git revert -m 1 --no-edit "${GITHUB_SHA}"; then
+            git commit --amend -m "$(git log -1 --pretty=%B) [skip ci] [skip-revert]"
+            echo "✅ Created merge-revert commit from ${GITHUB_SHA}."
+          else
+            git revert --abort || true
+            SHORT_SHA="${GITHUB_SHA:0:7}"
+            git commit --allow-empty -m "ci(auto-revert): manual rollback required for ${SHORT_SHA} [skip ci] [skip-revert]"
+            echo "⚠️ Automatic revert conflicted; created marker commit for manual rollback."
+          fi
+
+          git push origin "HEAD:${BRANCH_NAME}"
+
+  notify-pipeline:
+    name: "Notify Pipeline Status"
+    needs: [pipeline-summary, frontend, systems-config, deploy-test, deploy-uat, deploy-prod, auto-revert-on-failure]
+    if: always()
+    uses: ./.github/workflows/notifications.yml
+    with:
+      status: ${{ (needs.frontend.result == 'success' || needs.frontend.result == 'skipped') && 'success' || (needs.frontend.result == 'cancelled' && 'cancelled' || 'failure') }}
+      system-dir: FE Single
+      pipeline-type: FE Single Master
+      error-details: ${{ needs.frontend.result != 'success' && needs.frontend.result != 'skipped' && 'Master FE single pipeline reported failures.' || '' }}
+      deployment-url: ${{ github.ref_name == 'main' && needs.deploy-prod.outputs.deployment_url || (github.ref_name == 'uat' && needs.deploy-uat.outputs.deployment_url || (github.ref_name == 'test' && needs.deploy-test.outputs.deployment_url || '')) }}
+      deployment-urls-json: ${{ format('{{"{0}":"{1}"}}', needs.systems-config.outputs.system_name, (github.ref_name == 'main' && needs.deploy-prod.outputs.deployment_url || (github.ref_name == 'uat' && needs.deploy-uat.outputs.deployment_url || (github.ref_name == 'test' && needs.deploy-test.outputs.deployment_url || '')))) }}
+    secrets:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+

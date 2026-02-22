@@ -345,6 +345,7 @@ jobs:
           if [ -z "${GH_TOKEN}" ]; then
             GH_TOKEN="${GH_PR_TOKEN_LEGACY}"
           fi
+          export GH_TOKEN
 
           if [ -z "${GH_TOKEN}" ]; then
             echo "⚠️ GH_PR_TOKEN/GHPR_TOKEN is not set; skipping About homepage update."
