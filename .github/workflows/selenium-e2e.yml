@@ -1,0 +1,102 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  REUSABLE: Selenium E2E Tests                                  ║
+# ║  Runs Selenium-based browser tests for web systems             ║
+# ╚══════════════════════════════════════════════════════════════════╝
+name: "Reusable: Selenium E2E"
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        required: false
+        type: string
+        default: "."
+        description: "Project directory (e.g. systems/system-a, or '.' for root)"
+      system-name:
+        required: true
+        type: string
+        description: "System name for display/artifacts"
+      node-version:
+        required: false
+        type: number
+        default: 20
+        description: "Node.js version"
+      install-command:
+        required: false
+        type: string
+        default: "npm ci"
+        description: "Dependency installation command"
+      test-command:
+        required: false
+        type: string
+        default: "npm run test:e2e"
+        description: "Selenium E2E command"
+      e2e-base-url:
+        required: false
+        type: string
+        default: ""
+        description: "Optional base URL for E2E (e.g. deployed URL)"
+      upload-artifacts:
+        required: false
+        type: boolean
+        default: true
+        description: "Upload test artifacts/logs"
+      run-only-on-branch:
+        required: false
+        type: string
+        default: "uat"
+        description: "Branch name allowed to run Selenium (default: uat)"
+    outputs:
+      e2e-result:
+        description: "E2E test pass/fail result"
+        value: ${{ jobs.selenium-e2e.outputs.result }}
+
+jobs:
+  selenium-e2e:
+    name: "Selenium E2E — ${{ inputs.system-name }}"
+    if: ${{ github.ref_name == inputs.run-only-on-branch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: ./${{ inputs.working-directory }}
+    outputs:
+      result: ${{ steps.run-e2e.outcome }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ inputs.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: "npm"
+          cache-dependency-path: |
+            **/package-lock.json
+
+      - name: Install Dependencies
+        run: ${{ inputs.install-command }}
+
+      - name: Verify browser tools
+        run: |
+          echo "Google Chrome path: $(command -v google-chrome || true)"
+          echo "Chromium path: $(command -v chromium-browser || command -v chromium || true)"
+          echo "ChromeDriver path: $(command -v chromedriver || true)"
+
+      - name: Run Selenium E2E
+        id: run-e2e
+        env:
+          E2E_BASE_URL: ${{ inputs.e2e-base-url }}
+        run: ${{ inputs.test-command }}
+
+      - name: Upload E2E Artifacts
+        if: ${{ inputs.upload-artifacts && always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.system-name }}-selenium-e2e-artifacts
+          path: |
+            ${{ inputs.working-directory }}/tests/e2e/**
+            ${{ inputs.working-directory }}/test-results/**
+            ${{ inputs.working-directory }}/playwright-report/**
+          if-no-files-found: ignore
+          retention-days: 7
