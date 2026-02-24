@@ -276,7 +276,6 @@ jobs:
               --arg title '${{ steps.prepare.outputs.emoji }} ${{ steps.prepare.outputs.title }}' \
               --arg systems '${{ inputs['system-dir'] }}' \
               --arg pipeline '${{ inputs['pipeline-type'] }}' \
-              --arg branch '${{ github.ref_name }}' \
               --arg actor '${{ github.actor }}' \
               --arg workflow '${{ steps.prepare.outputs.workflow_name }}' \
               --arg attempt '${{ steps.prepare.outputs.run_attempt }}' \
@@ -288,7 +287,6 @@ jobs:
               --arg deploymentUrlsJson '${{ inputs['deployment-urls-json'] }}' \
               --arg details '${{ inputs['error-details'] }}' \
               --argjson envColor ${{ steps.prepare.outputs.env_color }} \
-              --arg imageUrl '${{ steps.prepare.outputs.image_url }}' \
               '((try ($deploymentUrlsJson | fromjson) catch {}) | to_entries | map(select((.key | length) > 0 and ((.value | tostring) | length) > 0))) as $deploymentEntries |
               ($deploymentEntries | map("• " + .key + ": " + (.value | tostring)) | join("\n")) as $deploymentLines |
               ($deploymentEntries | length) as $deploymentCount |
@@ -305,7 +303,6 @@ jobs:
                         {name:"Systems", value:$systems, inline:false},
                         {name:"Pipeline", value:$pipeline, inline:true},
                         {name:"Environment", value:$envLabel, inline:true},
-                        {name:"Branch", value:$branch, inline:true},
                         {name:"Workflow", value:$workflow, inline:true},
                         {name:"Run Attempt", value:$attempt, inline:true},
                         {name:"Short SHA", value:$shortSha, inline:true},
@@ -315,7 +312,6 @@ jobs:
                       + (if ($deploymentUrl | length) > 0 then [{name:"Deployment", value:$deploymentUrl, inline:false}] else [] end)
                       + (if ($deploymentLines | length) > 0 and ($deploymentCount > 1 or ($deploymentUrl | length) == 0 or $firstDeploymentUrl != $deploymentUrl) then [{name:"Deployments", value:$deploymentLines, inline:false}] else [] end)
                     ),
-                    image: (if ($imageUrl | length) > 0 then {url:$imageUrl} else null end),
                     url: $runUrl
                   }
                 ]

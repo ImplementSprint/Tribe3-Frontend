@@ -343,7 +343,8 @@ jobs:
           else
             DETAILS=$(printf "%s\n- **Version tag:** \`%s\`" "${DETAILS}" "${VERSION_TAG:-N/A}")
           fi
-          DETAILS=$(printf "%s\n- **Commit:** \`%s\`\n- **Compare:** [View changes](%s)\n- **Triggered at:** %s\n- **Pipeline run:** [View workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" "${DETAILS}" "${SHORT_SHA}" "${COMPARE_URL}" "${TIMESTAMP}")
+          TRIGGERED_BY="${GITHUB_TRIGGERING_ACTOR:-${GITHUB_ACTOR}}"
+          DETAILS=$(printf "%s\n- **Commit:** \`%s\`\n- **Compare:** [View changes](%s)\n- **Triggered by:** @%s\n- **Triggered at:** %s\n- **Pipeline run:** [View workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" "${DETAILS}" "${SHORT_SHA}" "${COMPARE_URL}" "${TRIGGERED_BY}" "${TIMESTAMP}")
 
           PR_BODY=$(cat <<ENDOFBODY
           ${HEADER}
