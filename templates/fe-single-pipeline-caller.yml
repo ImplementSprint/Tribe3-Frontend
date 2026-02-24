@@ -1,0 +1,48 @@
+# Template: FE Single Pipeline Caller (for other repositories)
+# Copy this file to: .github/workflows/master-pipeline-fe-single.yml in the target repo.
+#
+# IMPORTANT:
+# - Update the `uses` repository/ref below to point to your central pipeline repo.
+# - Keep all CI/CD logic inside the called master orchestrator workflow.
+
+name: "Master Pipeline Caller — FE Single"
+
+on:
+  push:
+    branches: [test, uat, main]
+  pull_request:
+    branches: [test, uat, main]
+  workflow_dispatch:
+    inputs:
+      run_deploy:
+        description: "Run deploy jobs"
+        type: boolean
+        default: true
+      run_promotion:
+        description: "Run PR promotion jobs"
+        type: boolean
+        default: true
+      dry_run:
+        description: "Preview-only mode (skip deploy/tag push, print PR body)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  packages: write
+  pull-requests: write
+  security-events: write
+
+concurrency:
+  group: master-pipeline-fe-single-caller-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  master-orchestrator:
+    name: "Call Master Orchestrator"
+    uses: ImplementSprint/CICD-Fe-Multi/.github/workflows/master-pipeline-fe-single.yml@main
+    with:
+      run_deploy: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_deploy == 'true' }}
+      run_promotion: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_promotion == 'true' }}
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
+    secrets: inherit

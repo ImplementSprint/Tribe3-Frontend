@@ -1,0 +1,229 @@
+# Template: FE Single Pipeline Caller (for other repositories)
+# Copy this file to: .github/workflows/master-pipeline-fe-single.yml in the target repo.
+#
+# IMPORTANT:
+# - Update CENTRAL_PIPELINE_REPO and CENTRAL_PIPELINE_REF below.
+# - Add required secrets/vars in the target repo.
+# - This template calls reusable workflows from the central pipeline repository.
+#
+# Required repository variables:
+# - FE_SINGLE_SYSTEM_JSON
+#   Example:
+#   {"name":"Maxine-Web","dir":".","image":"maxine-web","vercel_project_secret":"VERCEL_PROJECT_ID_FE_SINGLE"}
+# - DISCORD_SUCCESS_IMAGE_URL (or DISCORD_SUCCESS)
+# - DISCORD_FAIL_IMAGE_URL (or DISCORD_FAIL)
+# - DISCORD_CANCELLED_IMAGE_URL (or DISCORD_CANCELLED)
+#
+# Required repository secrets:
+# - VERCEL_TOKEN
+# - VERCEL_ORG_ID
+# - VERCEL_PROJECT_ID_FE_SINGLE (or the secret name referenced by FE_SINGLE_SYSTEM_JSON.vercel_project_secret)
+# - SONAR_TOKEN
+# - SONAR_ORGANIZATION
+# - SONAR_PROJECT_KEY
+# - SLACK_WEBHOOK_URL
+# - DISCORD_WEBHOOK_URL
+
+name: "Master Pipeline Orchestrator (Template Caller — FE Single)"
+
+on:
+  push:
+    branches: [test, uat, main]
+  pull_request:
+    branches: [test, uat, main]
+  workflow_dispatch:
+    inputs:
+      run_deploy:
+        description: "Run deploy jobs"
+        type: boolean
+        default: true
+      run_promotion:
+        description: "Run PR promotion jobs"
+        type: boolean
+        default: true
+      dry_run:
+        description: "Preview-only mode (skip deploy/tag push, print PR body)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  packages: write
+  pull-requests: write
+  security-events: write
+
+concurrency:
+  group: master-pipeline-fe-single-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CENTRAL_PIPELINE_REPO: ImplementSprint/Central_Template
+  CENTRAL_PIPELINE_REF: main
+
+jobs:
+  detect-changes:
+    name: "Detect Changed Files"
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+      shared: ${{ steps.filter.outputs.shared }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect file changes
+        id: filter
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36
+        with:
+          filters: |
+            frontend:
+              - '**'
+            shared:
+              - '.github/**'
+              - 'package.json'
+              - 'sonar-project.properties'
+
+  systems-config:
+    name: "Resolve FE Single Configuration"
+    runs-on: ubuntu-latest
+    outputs:
+      system_name: ${{ steps.resolve.outputs.system_name }}
+      working_dir: ${{ steps.resolve.outputs.working_dir }}
+      image_name: ${{ steps.resolve.outputs.image_name }}
+      vercel_project_secret: ${{ steps.resolve.outputs.vercel_project_secret }}
+    steps:
+      - name: Resolve FE single config
+        id: resolve
+        env:
+          FE_SINGLE_SYSTEM_JSON: ${{ vars.FE_SINGLE_SYSTEM_JSON }}
+        run: |
+          if [ -z "${FE_SINGLE_SYSTEM_JSON}" ]; then
+            echo "❌ Missing required repository variable FE_SINGLE_SYSTEM_JSON."
+            exit 1
+          fi
+
+          CONFIG=$(echo "${FE_SINGLE_SYSTEM_JSON}" | jq -c 'if type == "array" then .[0] else . end')
+
+          echo "${CONFIG}" | jq -e 'type == "object"' >/dev/null
+          echo "${CONFIG}" | jq -e '(.name|type=="string" and length>0) and (.dir|type=="string" and length>0) and (.image|type=="string" and length>0) and (.vercel_project_secret|type=="string" and length>0)' >/dev/null
+
+          SYSTEM_NAME=$(echo "${CONFIG}" | jq -r '.name')
+          WORKING_DIR=$(echo "${CONFIG}" | jq -r '.dir')
+          IMAGE_NAME=$(echo "${CONFIG}" | jq -r '.image')
+          VERCEL_PROJECT_SECRET=$(echo "${CONFIG}" | jq -r '.vercel_project_secret')
+
+          echo "system_name=${SYSTEM_NAME}" >> "$GITHUB_OUTPUT"
+          echo "working_dir=${WORKING_DIR}" >> "$GITHUB_OUTPUT"
+          echo "image_name=${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "vercel_project_secret=${VERCEL_PROJECT_SECRET}" >> "$GITHUB_OUTPUT"
+
+  frontend:
+    name: "${{ needs.systems-config.outputs.system_name }} Pipeline"
+    needs: [detect-changes, systems-config]
+    if: needs.detect-changes.outputs.frontend == 'true' || needs.detect-changes.outputs.shared == 'true'
+    uses: ImplementSprint/CICD-Fe-Multi/.github/workflows/front-end-workflow.yml@main
+    with:
+      system-dir: ${{ needs.systems-config.outputs.working_dir }}
+      system-name: ${{ needs.systems-config.outputs.system_name }}
+      enable-security-scan: true
+      enable-sonar: false
+    secrets: inherit
+
+  version-test:
+    name: "Version Tag — TEST"
+    needs: [frontend]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/test' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true') &&
+      (needs.frontend.result == 'success' || needs.frontend.result == 'skipped')
+    uses: ImplementSprint/CICD-Fe-Multi/.github/workflows/versioning.yml@main
+    with:
+      mode: test
+      update-package-locks: true
+
+  deploy-test:
+    name: "TEST — ${{ needs.systems-config.outputs.system_name }}"
+    needs: [frontend, systems-config]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/test' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name != 'workflow_dispatch' || (github.event.inputs.run_deploy == 'true' && github.event.inputs.dry_run != 'true')) &&
+      (needs.frontend.result == 'success' || needs.frontend.result == 'skipped')
+    uses: ImplementSprint/CICD-Fe-Multi/.github/workflows/vercel-deploy.yml@main
+    with:
+      working-directory: ${{ needs.systems-config.outputs.working_dir }}
+      environment: preview
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets[needs.systems-config.outputs.vercel_project_secret] }}
+
+  deploy-uat:
+    name: "UAT — ${{ needs.systems-config.outputs.system_name }}"
+    needs: [frontend, systems-config]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/uat' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name != 'workflow_dispatch' || (github.event.inputs.run_deploy == 'true' && github.event.inputs.dry_run != 'true')) &&
+      (needs.frontend.result == 'success' || needs.frontend.result == 'skipped')
+    uses: ImplementSprint/CICD-Fe-Multi/.github/workflows/vercel-deploy.yml@main
+    with:
+      working-directory: ${{ needs.systems-config.outputs.working_dir }}
+      environment: preview
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets[needs.systems-config.outputs.vercel_project_secret] }}
+
+  production-gate:
+    name: "Production Readiness Gate"
+    needs: [frontend, systems-config]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name != 'workflow_dispatch' || (github.event.inputs.run_deploy == 'true' && github.event.inputs.dry_run != 'true')) &&
+      (needs.frontend.result == 'success' || needs.frontend.result == 'skipped')
+    uses: ImplementSprint/CICD-Fe-Multi/.github/workflows/production-gate.yml@main
+    with:
+      system-dir: ${{ needs.systems-config.outputs.working_dir }}
+      app-type: web
+    secrets: inherit
+
+  deploy-prod:
+    name: "Prod — ${{ needs.systems-config.outputs.system_name }}"
+    needs: [production-gate, systems-config]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_deploy == 'true' && github.event.inputs.dry_run != 'true'))
+    uses: ImplementSprint/CICD-Fe-Multi/.github/workflows/vercel-deploy.yml@main
+    with:
+      working-directory: ${{ needs.systems-config.outputs.working_dir }}
+      environment: production
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets[needs.systems-config.outputs.vercel_project_secret] }}
+
+  notify-pipeline:
+    name: "Notify Pipeline Status"
+    needs: [frontend, systems-config, deploy-test, deploy-uat, deploy-prod]
+    if: always()
+    uses: ImplementSprint/CICD-Fe-Multi/.github/workflows/notifications.yml@main
+    with:
+      status: ${{ (needs.frontend.result == 'success' || needs.frontend.result == 'skipped') && 'success' || (needs.frontend.result == 'cancelled' && 'cancelled' || 'failure') }}
+      system-dir: FE Single
+      pipeline-type: FE Single Master
+      error-details: ${{ needs.frontend.result != 'success' && needs.frontend.result != 'skipped' && 'Master FE single pipeline reported failures.' || '' }}
+      deployment-url: ${{ github.ref_name == 'main' && needs.deploy-prod.outputs.deployment_url || (github.ref_name == 'uat' && needs.deploy-uat.outputs.deployment_url || (github.ref_name == 'test' && needs.deploy-test.outputs.deployment_url || '')) }}
+      deployment-urls-json: ${{ format('{{"{0}":"{1}"}}', needs.systems-config.outputs.system_name, (github.ref_name == 'main' && needs.deploy-prod.outputs.deployment_url || (github.ref_name == 'uat' && needs.deploy-uat.outputs.deployment_url || (github.ref_name == 'test' && needs.deploy-test.outputs.deployment_url || '')))) }}
+      success-image-url: ${{ vars.DISCORD_SUCCESS_IMAGE_URL != '' && vars.DISCORD_SUCCESS_IMAGE_URL || vars.DISCORD_SUCCESS }}
+      failure-image-url: ${{ vars.DISCORD_FAIL_IMAGE_URL != '' && vars.DISCORD_FAIL_IMAGE_URL || vars.DISCORD_FAIL }}
+      cancelled-image-url: ${{ vars.DISCORD_CANCELLED_IMAGE_URL != '' && vars.DISCORD_CANCELLED_IMAGE_URL || vars.DISCORD_CANCELLED }}
+    secrets:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

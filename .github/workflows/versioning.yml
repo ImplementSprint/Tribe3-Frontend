@@ -12,6 +12,16 @@ on:
         type: string
         default: "global"
         description: "Version stream key (global keeps legacy test-v/main-v tags)"
+      update-package-locks:
+        required: false
+        type: boolean
+        default: false
+        description: "Refresh npm package-lock.json files and commit before tagging"
+      lockfile-node-version:
+        required: false
+        type: number
+        default: 20
+        description: "Node.js version used when refreshing package-lock files"
     outputs:
       version_tag:
         description: "Resolved version tag"
@@ -32,6 +42,48 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ github.token }}
+
+      - name: Setup Node.js for lockfile refresh
+        if: ${{ inputs.update-package-locks }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.lockfile-node-version }}
+
+      - name: Refresh npm package-lock files
+        if: ${{ inputs.update-package-locks }}
+        run: |
+          set -e
+
+          mapfile -t PACKAGE_JSONS < <(find . -type f -name package.json \
+            -not -path "*/node_modules/*" \
+            -not -path "*/.next/*" \
+            -not -path "*/coverage/*")
+
+          if [ "${#PACKAGE_JSONS[@]}" -eq 0 ]; then
+            echo "ℹ️ No package.json files found. Skipping lockfile refresh."
+            exit 0
+          fi
+
+          for pkg in "${PACKAGE_JSONS[@]}"; do
+            dir=$(dirname "$pkg")
+            echo "🔄 Refreshing lockfile in ${dir}"
+            (
+              cd "$dir"
+              npm install --package-lock-only --ignore-scripts
+            )
+          done
+
+          git add '**/package-lock.json'
+
+          if git diff --cached --quiet; then
+            echo "ℹ️ No lockfile changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(lockfiles): refresh package-lock files"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Create and Push Tag
         id: version

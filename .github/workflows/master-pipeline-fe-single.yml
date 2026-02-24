@@ -822,9 +822,9 @@ jobs:
       error-details: ${{ needs.frontend.result != 'success' && needs.frontend.result != 'skipped' && 'Master FE multi pipeline reported failures.' || '' }}
       deployment-url: ''
       deployment-urls-json: ${{ github.ref_name == 'main' && needs.prepare-notify-prod-payload.outputs.deployment_urls_json || (github.ref_name == 'uat' && needs.prepare-promotion-uat-payload.outputs.deployment_urls_json || (github.ref_name == 'test' && needs.prepare-promotion-test-payload.outputs.deployment_urls_json || '{}')) }}
-      success-image-url: ${{ vars.JED_SUCCESS_IMAGE_URL }}
-      failure-image-url: ${{ vars.JED_FAIL_IMAGE_URL }}
-      cancelled-image-url: ${{ vars.JED_CANCELLED_IMAGE_URL }}
+      success-image-url: ${{ vars.DISCORD_SUCCESS_IMAGE_URL != '' && vars.DISCORD_SUCCESS_IMAGE_URL || vars.DISCORD_SUCCESS }}
+      failure-image-url: ${{ vars.DISCORD_FAIL_IMAGE_URL != '' && vars.DISCORD_FAIL_IMAGE_URL || vars.DISCORD_FAIL }}
+      cancelled-image-url: ${{ vars.DISCORD_CANCELLED_IMAGE_URL != '' && vars.DISCORD_CANCELLED_IMAGE_URL || vars.DISCORD_CANCELLED }}
     secrets:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
