@@ -55,10 +55,14 @@ async function runSmoke() {
   }
 }
 
-try {
-  await runSmoke();
-} catch (error) {
-  console.error('❌ Selenium smoke failed');
-  console.error(error);
-  process.exit(1);
+async function main() {
+  try {
+    await runSmoke();
+  } catch (error) {
+    console.error('❌ Selenium smoke failed');
+    console.error(error);
+    process.exit(1);
+  }
 }
+
+void main();
