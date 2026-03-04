@@ -4,6 +4,7 @@ import Header from '../src/components/Header';
 import Footer from '../src/components/Footer';
 import Home from '../src/pages/Home';
 import About from '../src/pages/About';
+import Programs from '../src/pages/Programs';
 import NotFound from '../src/pages/NotFound';
 import Page from '../src/app/page';
 import RootLayout, { metadata } from '../src/app/layout';
@@ -51,6 +52,14 @@ describe('BayaniHub-Web UI', () => {
     expect(screen.getByRole('heading', { name: 'About BayaniHub' })).toBeInTheDocument();
     expect(screen.getByText(/community-driven platform/i)).toBeInTheDocument();
     expect(screen.getByText(/every Filipino deserves a voice/i)).toBeInTheDocument();
+  });
+
+  it('renders community programs page content', () => {
+    render(<Programs />);
+
+    expect(screen.getByRole('heading', { name: 'Community Programs' })).toBeInTheDocument();
+    expect(screen.getByText(/volunteer drives, youth activities/i)).toBeInTheDocument();
+    expect(screen.getByText(/ways to contribute to your local community/i)).toBeInTheDocument();
   });
 
   it('renders not found page message', () => {
