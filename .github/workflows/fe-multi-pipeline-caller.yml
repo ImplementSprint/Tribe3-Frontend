@@ -1,13 +1,11 @@
-# ──────────────────────────────────────────────────────────────
-# FE Pipeline Caller (unified)
-# Copy this file into the target repo at:
-#   .github/workflows/master-pipeline-fe.yml
+# Template: FE Multi Pipeline Caller (for other repositories)
+# Copy this file to: .github/workflows/master-pipeline-fe-multi.yml in the target repo.
 #
-# Works for both single-system and multi-system FE repositories.
-# The pipeline_mode input controls which SYSTEMS_JSON variable
-# is read (auto = picks multi if available, else single).
-# ──────────────────────────────────────────────────────────────
-name: "Master Pipeline — FE"
+# IMPORTANT:
+# - Update the `uses` repository/ref below to point to your central pipeline repo.
+# - Keep all CI/CD logic inside the called master orchestrator workflow.
+
+name: "Master Pipeline Caller — FE Multi"
 
 on:
   push:
@@ -16,47 +14,6 @@ on:
     branches: [test, uat, main]
   workflow_dispatch:
     inputs:
-      pipeline_mode:
-        description: "Pipeline mode (auto|single|multi)"
-        type: choice
-        options: [auto, single, multi]
-        default: auto
-      enable_selenium:
-        description: "Run Selenium E2E checks"
-        type: boolean
-        default: true
-      selenium_mode:
-        description: "Selenium execution mode (local|grid)"
-        type: string
-        default: "local"
-      selenium_browsers:
-        description: "Selenium browser list (JSON array or CSV)"
-        type: string
-        default: '["chrome"]'
-      selenium_grid_url:
-        description: "Selenium Grid URL (required when selenium_mode=grid)"
-        type: string
-        default: ""
-      selenium_run_only_on_branch:
-        description: "Branch allowed for Selenium execution"
-        type: string
-        default: "test,uat"
-      enable_grafana_k6:
-        description: "Run Grafana k6 cloud checks"
-        type: boolean
-        default: true
-      k6_script_path:
-        description: "Path to k6 script"
-        type: string
-        default: "tests/performance/k6-smoke.js"
-      k6_base_url:
-        description: "Optional base URL for k6"
-        type: string
-        default: ""
-      k6_run_only_on_branch:
-        description: "Branch allowed for k6 execution"
-        type: string
-        default: "test,uat"
       run_deploy:
         description: "Run deploy jobs"
         type: boolean
@@ -70,25 +27,24 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: write
+  packages: write
+  pull-requests: write
+  security-events: write
+
 concurrency:
-  group: master-pipeline-fe-${{ github.ref }}
+  group: master-pipeline-fe-multi-caller-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  call-orchestrator:
+  master-orchestrator:
+    if: ${{ github.event.repository.name != 'central-workflow' }}
+    name: "Call Unified Master Orchestrator"
     uses: ImplementSprint/central-workflow/.github/workflows/master-pipeline-fe.yml@main
     with:
-      pipeline_mode: ${{ inputs.pipeline_mode || 'auto' }}
-      enable_selenium: ${{ inputs.enable_selenium == '' && true || inputs.enable_selenium }}
-      selenium_mode: ${{ inputs.selenium_mode || 'local' }}
-      selenium_browsers: ${{ inputs.selenium_browsers || '["chrome"]' }}
-      selenium_grid_url: ${{ inputs.selenium_grid_url || '' }}
-      selenium_run_only_on_branch: ${{ inputs.selenium_run_only_on_branch || 'test,uat' }}
-      enable_grafana_k6: ${{ inputs.enable_grafana_k6 == '' && true || inputs.enable_grafana_k6 }}
-      k6_script_path: ${{ inputs.k6_script_path || 'tests/performance/k6-smoke.js' }}
-      k6_base_url: ${{ inputs.k6_base_url || '' }}
-      k6_run_only_on_branch: ${{ inputs.k6_run_only_on_branch || 'test,uat' }}
-      run_deploy: ${{ inputs.run_deploy == '' && true || inputs.run_deploy }}
-      run_promotion: ${{ inputs.run_promotion == '' && true || inputs.run_promotion }}
-      dry_run: ${{ inputs.dry_run == '' && false || inputs.dry_run }}
+      pipeline_mode: multi
+      run_deploy: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_deploy == 'true' }}
+      run_promotion: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_promotion == 'true' }}
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
     secrets: inherit
