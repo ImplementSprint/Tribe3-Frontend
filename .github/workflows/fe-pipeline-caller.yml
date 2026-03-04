@@ -71,19 +71,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  call-orchestrator:
+  call-orchestrator-default:
+    if: ${{ github.event_name != 'workflow_dispatch' }}
+    uses: ImplementSprint/central-workflow/.github/workflows/master-pipeline-fe.yml@main
+    secrets: inherit
+
+  call-orchestrator-dispatch:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     uses: ImplementSprint/central-workflow/.github/workflows/master-pipeline-fe.yml@main
     with:
-      pipeline_mode: ${{ inputs.pipeline_mode || 'auto' }}
-      enable_selenium: ${{ inputs.enable_selenium == '' && true || inputs.enable_selenium }}
-      selenium_browsers: ${{ inputs.selenium_browsers || '["chrome"]' }}
-      e2e_base_url: ${{ inputs.e2e_base_url || '' }}
-      selenium_run_only_on_branch: ${{ inputs.selenium_run_only_on_branch || 'test,uat' }}
-      enable_grafana_k6: ${{ inputs.enable_grafana_k6 == '' && true || inputs.enable_grafana_k6 }}
-      k6_script_path: ${{ inputs.k6_script_path || 'tests/performance/k6-smoke.js' }}
-      k6_base_url: ${{ inputs.k6_base_url || '' }}
-      k6_run_only_on_branch: ${{ inputs.k6_run_only_on_branch || 'test,uat' }}
-      run_deploy: ${{ inputs.run_deploy == '' && true || inputs.run_deploy }}
-      run_promotion: ${{ inputs.run_promotion == '' && true || inputs.run_promotion }}
-      dry_run: ${{ inputs.dry_run == '' && false || inputs.dry_run }}
+      pipeline_mode: ${{ inputs.pipeline_mode }}
+      enable_selenium: ${{ inputs.enable_selenium }}
+      selenium_browsers: ${{ inputs.selenium_browsers }}
+      e2e_base_url: ${{ inputs.e2e_base_url }}
+      selenium_run_only_on_branch: ${{ inputs.selenium_run_only_on_branch }}
+      enable_grafana_k6: ${{ inputs.enable_grafana_k6 }}
+      k6_script_path: ${{ inputs.k6_script_path }}
+      k6_base_url: ${{ inputs.k6_base_url }}
+      k6_run_only_on_branch: ${{ inputs.k6_run_only_on_branch }}
+      run_deploy: ${{ inputs.run_deploy }}
+      run_promotion: ${{ inputs.run_promotion }}
+      dry_run: ${{ inputs.dry_run }}
     secrets: inherit
