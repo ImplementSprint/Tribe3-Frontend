@@ -73,6 +73,8 @@ concurrency:
 permissions:
   contents: write
   pull-requests: write
+  packages: write
+  security-events: write
 
 jobs:
   call-orchestrator:
